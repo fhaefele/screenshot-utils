@@ -1,0 +1,9 @@
+{
+  "uuid": "screenshot-utils@fxth.dev",
+  "name": "Screenshot Utils",
+  "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions.",
+  "version": 1,
+  "license": "GPL-3.0-or-later",
+  "shell-version": ["46", "47", "48", "49", "50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.screenshot-utils"
+}

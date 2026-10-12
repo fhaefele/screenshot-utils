@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.screenshot-utils" path="/org/gnome/shell/extensions/screenshot-utils/">
+    <key name="save-location" type="s">
+      <default>'~/Pictures'</default>
+      <summary>Screenshot folder</summary>
+      <description>Folder for saved captures. Initialized to the Pictures folder; cannot be empty.</description>
+    </key>
+    <key name="filename-template" type="s">
+      <default>'Screenshot-{Y}-{m}-{d}-{H}{M}{S}'</default>
+      <summary>Filename template</summary>
+      <description>Supports {date}, {time}, {type}, {Y}, {m}, {d}, {H}, {M}, {S}, and {N}.</description>
+    </key>
+    <key name="capture-delay-ms" type="i">
+      <default>0</default>
+      <range min="0" max="30000"/>
+      <summary>Capture delay in milliseconds</summary>
+    </key>
+    <key name="show-notifications" type="b">
+      <default>true</default>
+      <summary>Show capture notifications</summary>
+    </key>
+    <key name="include-cursor" type="b">
+      <default>false</default>
+      <summary>Include the pointer</summary>
+    </key>
+    <key name="copy-to-clipboard" type="b">
+      <default>false</default>
+      <summary>Copy the screenshot image to the clipboard</summary>
+    </key>
+    <key name="mute-screenshot-sound" type="b">
+      <default>false</default>
+      <summary>Mute the screenshot capture sound</summary>
+    </key>
+  </schema>
+</schemalist>
