@@ -36,7 +36,7 @@ XDG_DATA_DIRS=/usr/local/share:/usr/share dbus-run-session -- gnome-shell --devk
 
 Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Repack/reinstall and restart the nested Shell after changes. Shell 46-48 uses `--nested` instead of `--devkit`.
 
-Live-tested on Shell 50.1. Shell 46-49/51, multiple monitors and fractional scaling need live testing. Nested Shell shares your files and settings. Print keeps GNOME's standard capture workflow.
+Live-tested on Shell 50.1. Shell 46-49/51, multiple monitors and fractional scaling need live testing. Manual nested testing uses your normal folders and preferences. Print Screen still opens GNOME's own screenshot UI.
 
 ## License
 
