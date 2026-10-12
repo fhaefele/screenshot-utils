@@ -10,12 +10,13 @@ Filename tokens: `{date}` = YYYY-MM-DD, `{time}` = HH-MM-SS, `{type}`/`{N}` = ar
 
 ## Install
 
+Download the ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest):
+
 ```sh
-npm run pack
-gnome-extensions install --force dist/screenshot-utils@fxth.dev.shell-extension.zip
+gnome-extensions install --force screenshot-utils@fxth.dev.shell-extension.zip
 ```
 
-After first install, log out/in, then enable in Extensions.
+After first install, log out/in, then enable in Extensions. Build from source with `npm run pack`; ZIP written to `dist/`.
 
 ## Test
 
@@ -24,7 +25,7 @@ npm test
 npm run test:gnome
 ```
 
-Unit tests require Node.js. GNOME tests require Shell 50+ and run headless with isolated settings.
+CI checks unit tests, syntax and schemas, then builds the ZIP. Matching version tags publish releases. GNOME tests require Shell 50+ and run locally with isolated settings.
 
 For manual testing, install the ZIP above, then:
 
