@@ -25,7 +25,7 @@ npm test
 npm run test:gnome
 ```
 
-CI checks unit tests, syntax and schemas, then builds the ZIP. Matching version tags publish releases. GNOME tests require Shell 50+ and run locally with isolated settings.
+CI checks unit tests, syntax and schemas, then builds the ZIP. Matching annotated version tags publish releases using their tag notes. GNOME tests require Shell 50+ and run locally with isolated settings.
 
 For manual testing, install the ZIP above, then:
 
