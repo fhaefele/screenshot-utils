@@ -8,7 +8,10 @@ import {bundleLegacy} from '../scripts/pack.js';
 const directory = await mkdtemp(join(tmpdir(), 'screenshot-utils-runtime-'));
 try {
     const path = join(directory, 'runtime.js');
-    await bundleLegacy('legacy-runtime.js', path, 'LegacyRuntime');
+    await bundleLegacy('legacy-runtime.js', path, 'LegacyRuntime', {
+        preamble: 'globalThis.bootstrapReady = true;',
+        footer: 'globalThis.bundleReady = typeof LegacyRuntime.Extension === \"function\";',
+    });
     const schema = {};
     let loadedDirectory;
     class Settings {
@@ -18,8 +21,13 @@ try {
         get_default: () => 'default',
         new_from_directory: path => { loadedDirectory = path; return {lookup: () => schema}; },
     }};
-    const context = vm.createContext({imports: {gi: {Gio: new Proxy(Gio, {ownKeys() { throw new Error('GI namespace enumerated'); }})}}});
+    const gi = {get Gio() {
+        assert.equal(context.bootstrapReady, true, 'Native imports loaded before bootstrap');
+        return new Proxy(Gio, {ownKeys() { throw new Error('GI namespace enumerated'); }});
+    }};
+    const context = vm.createContext({imports: {gi}});
     vm.runInContext(await readFile(path, 'utf8'), context);
+    assert.equal(context.bundleReady, true, 'Footer ran before bundle initialization');
     const {Extension, InjectionManager} = context.LegacyRuntime;
     const extension = new Extension({metadata: {uuid: 'test', 'settings-schema': 'test.schema'},
         path: '/extension', dir: {get_child: () => ({get_path: () => '/extension/schemas'})}});

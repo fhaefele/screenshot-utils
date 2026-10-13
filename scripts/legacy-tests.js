@@ -4,12 +4,12 @@ import {bundleLegacy} from './pack.js';
 
 await mkdir('dist/tests/perf', {recursive: true});
 await bundleLegacy('tests/shell.js', resolve('dist/tests/perf/screenshotUtils.js'), 'ScreenshotUtilsTests',
-    'var METRICS = {};\nfunction run() { return ScreenshotUtilsTests.run(); }\nfunction finish() {}');
-await bundleLegacy('tests/preferences-checks.js', resolve('dist/tests/preferences-42.js'), 'ScreenshotUtilsPreferencesChecks', `
+    {footer: 'var METRICS = {};\nfunction run() { return ScreenshotUtilsTests.run(); }\nfunction finish() {}'});
+await bundleLegacy('tests/preferences-checks.js', resolve('dist/tests/preferences-42.js'), 'ScreenshotUtilsPreferencesChecks', {preamble: `
+imports.gi.versions.Gtk = '4.0';
 imports.gi.Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.searchPath.unshift('resource:///org/gnome/Shell/Extensions/js');
-imports.gi.versions.Gtk = '4.0';
-imports.gi.Adw.init();
+imports.gi.Adw.init();`, footer: `
 const directory = imports.gi.Gio.File.new_for_path(ARGV[0]);
 const [, contents] = directory.get_child('metadata.json').load_contents(null);
 const metadata = JSON.parse(imports.byteArray.toString(contents));
@@ -21,4 +21,4 @@ ScreenshotUtilsPreferencesChecks.checkPreferences(preferences).then(() => loop.q
     logError(error);
     imports.system.exit(1);
 });
-loop.run();`);
+loop.run();`});

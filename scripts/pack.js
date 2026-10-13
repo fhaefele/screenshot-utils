@@ -18,12 +18,12 @@ const legacyRequire = `function require(specifier) {
     return specifier.slice(prefix.length, -3).split('/').reduce((module, name) => module[name], imports);
 }`;
 
-export async function bundleLegacy(entry, outfile, globalName, footer = '') {
+export async function bundleLegacy(entry, outfile, globalName, {preamble = '', footer = ''} = {}) {
     await build({
         absWorkingDir: root, entryPoints: [entry], outfile, bundle: true,
         format: 'iife', globalName, target: 'firefox91', charset: 'utf8',
         external: ['resource://*'],
-        banner: {js: legacyRequire}, footer: {js: footer},
+        banner: {js: `${preamble}\n${legacyRequire}`}, footer: {js: footer},
         plugins: [{name: 'legacy-gjs', setup(builder) {
             // GI namespaces cannot be enumerated by CommonJS interop helpers.
             builder.onResolve({filter: /^gi:\/\//}, args => ({path: args.path, namespace: 'legacy-gi'}));
@@ -57,10 +57,10 @@ async function pack() {
                     await cp(resolve(root, source), resolve(directory, source));
             } else {
                 await bundleLegacy('extension.js', resolve(directory, 'extension.js'), 'ScreenshotUtilsExtensionModule',
-                    'function init(extension) { return new ScreenshotUtilsExtensionModule.default(extension); }');
+                    {footer: 'function init(extension) { return new ScreenshotUtilsExtensionModule.default(extension); }'});
                 await bundleLegacy('prefs.js', resolve(directory, 'prefs.js'), 'ScreenshotUtilsPreferencesModule',
-                    'function init() {}\nfunction fillPreferencesWindow(window) {\n' +
-                    '    new ScreenshotUtilsPreferencesModule.default(imports.misc.extensionUtils.getCurrentExtension()).fillPreferencesWindow(window);\n}');
+                    {footer: 'function init() {}\nfunction fillPreferencesWindow(window) {\n' +
+                    '    new ScreenshotUtilsPreferencesModule.default(imports.misc.extensionUtils.getCurrentExtension()).fillPreferencesWindow(window);\n}'});
             }
             const targetOutput = resolve(stage, 'packages', target);
             await mkdir(targetOutput, {recursive: true});
