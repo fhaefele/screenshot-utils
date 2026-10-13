@@ -135,7 +135,9 @@ class CaptureButton extends PanelMenu.Button {
             can_focus: true,
             track_hover: true,
             x_expand: true,
-            style: utility ? 'border-radius: 4px; min-width: 0; min-height: 0; padding: 3px;' : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
+            style: utility
+                ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
+                : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
             child: new St.Icon({icon_name: icon, icon_size: utility ? 16 : 32}),
         });
         button.connect('clicked', action);

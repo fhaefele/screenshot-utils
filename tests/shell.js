@@ -163,6 +163,12 @@ export async function run() {
                 await Scripting.sleep(200);
                 controls.forEach((actor, index) => {
                     const [width, height] = actor.get_transformed_size();
+                    const iconSize = index < 3 ? 32 : 16;
+                    const [iconWidth, iconHeight] = actor.child.get_transformed_size();
+                    assert(Math.abs(iconWidth - iconSize) < 1 && Math.abs(iconHeight - iconSize) < 1,
+                        `${actor.accessible_name} icon is clipped or resized`);
+                    assert(width >= iconSize + 6 && height >= iconSize + 6,
+                        `${actor.accessible_name} button clips its icon`);
                     assert(actor.has_style_class_name('button'), 'Capture control does not use native button styling');
                     assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
                         'Switching color scheme changed capture control geometry');
