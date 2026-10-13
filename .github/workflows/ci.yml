@@ -96,7 +96,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp dist/legacy/*.shell-extension.zip dist/screenshot-utils-gnome42.shell-extension.zip
+          cp dist/legacy/*.shell-extension.zip dist/screenshot-utils-gnome42-44.shell-extension.zip
           cp dist/modern/*.shell-extension.zip dist/screenshot-utils-modern.shell-extension.zip
           gh release create "$GITHUB_REF_NAME" dist/*.shell-extension.zip \
             --verify-tag \

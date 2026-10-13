@@ -1,6 +1,6 @@
 # Screenshot Utils
 
-Native screenshots for GNOME Shell 42 and 46-51 on Wayland, including Ubuntu 22.04/24.04/26.04.
+Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.04/26.04.
 
 ![Screenshot Utils capture menu and preferences](https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/assets/screenshot-utils.png)
 
@@ -12,7 +12,7 @@ Filename tokens: `{date}` = YYYY-MM-DD, `{time}` = HH-MM-SS, `{type}`/`{N}` = ar
 
 ## Install
 
-Download the ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest). Use `screenshot-utils-gnome42.shell-extension.zip` for Ubuntu 22.04 / Shell 42, or `screenshot-utils-modern.shell-extension.zip` for Shell 46-51. Both packages use the same extension UUID, settings and capture logic:
+Download the ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest). Use `screenshot-utils-gnome42-44.shell-extension.zip` for Shell 42-44, including Ubuntu 22.04, or `screenshot-utils-modern.shell-extension.zip` for Shell 45-51. Both packages use the same extension UUID, settings and capture logic:
 
 ```sh
 gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
@@ -36,11 +36,11 @@ GNOME stores the shortcuts across logins and handles conflicts. Commands require
 
 ```sh
 npm test
-npm run test:gnome  # Shell 46-51
-npm run test:legacy # Shell 42
+npm run test:gnome  # Shell 45-51
+npm run test:legacy # Shell 42-44
 ```
 
-CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42 and Ubuntu 24.04 / Shell 46. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 46-51, and `test:legacy` requires Shell 42.
+CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42 and Ubuntu 24.04 / Shell 46. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 45-51, and `test:legacy` requires Shell 42-44.
 
 For manual testing, install the ZIP above, then:
 
@@ -49,9 +49,9 @@ sudo apt install mutter-dev-bin
 XDG_DATA_DIRS=/usr/local/share:/usr/share dbus-run-session -- gnome-shell --devkit --wayland
 ```
 
-Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Test shortcut commands in its terminal; verify assigned keys in a normal GNOME session. Repack/reinstall and restart the nested Shell after changes. Shell 42/46-48 uses `--nested` instead of `--devkit`.
+Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Test shortcut commands in its terminal; verify assigned keys in a normal GNOME session. Repack/reinstall and restart the nested Shell after changes. Shell 42-48 uses `--nested` instead of `--devkit`.
 
-Live-tested on Ubuntu 22.04 / Shell 42.9 with Yaru and on Shell 46-51. Multiple monitors and fractional scaling need live testing. Manual nested testing uses your normal folders and preferences. Print Screen still opens GNOME's own screenshot UI.
+Live-tested on Ubuntu 22.04 / Shell 42.9 with Yaru and on every Shell version from 43 through 51. Multiple monitors and fractional scaling need live testing. Manual nested testing uses your normal folders and preferences. Print Screen still opens GNOME's own screenshot UI.
 
 ## License
 

@@ -6,11 +6,13 @@ import vm from 'node:vm';
 // Run separately after packing; ordinary unit tests need no GNOME tools.
 const metadata = JSON.parse(readFileSync('metadata.json', 'utf8'));
 const schema = readFileSync('schemas/org.gnome.shell.extensions.screenshot-utils.gschema.xml', 'utf8');
+const supportedVersions = [];
 for (const target of ['legacy', 'modern']) {
     const archive = `dist/${target}/${metadata.uuid}.shell-extension.zip`;
     const contents = name => execFileSync('unzip', ['-p', archive, name], {encoding: 'utf8'});
     const actual = JSON.parse(contents('metadata.json'));
-    assert.deepEqual(actual, {...metadata, 'shell-version': target === 'legacy' ? ['42'] : metadata['shell-version']});
+    assert.deepEqual(actual, {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']});
+    supportedVersions.push(...actual['shell-version']);
     assert.equal(contents('schemas/org.gnome.shell.extensions.screenshot-utils.gschema.xml'), schema);
     if (target === 'legacy')
         assert.ok(execFileSync('unzip', ['-p', archive, 'schemas/gschemas.compiled']).length > 0);
@@ -31,3 +33,7 @@ for (const target of ['legacy', 'modern']) {
             assert.equal(contents(file), readFileSync(file, 'utf8'));
     }
 }
+
+assert.deepEqual(supportedVersions.sort((a, b) => Number(a) - Number(b)),
+    Array.from({length: 10}, (_, index) => String(42 + index)),
+    'Packages must cover each Shell version from 42 through 51 exactly once');

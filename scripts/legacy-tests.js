@@ -5,7 +5,7 @@ import {bundleLegacy} from './pack.js';
 await mkdir('dist/tests/perf', {recursive: true});
 await bundleLegacy('tests/shell.js', resolve('dist/tests/perf/screenshotUtils.js'), 'ScreenshotUtilsTests',
     {footer: 'var METRICS = {};\nfunction run() { return ScreenshotUtilsTests.run(); }\nfunction finish() {}'});
-await bundleLegacy('tests/preferences-checks.js', resolve('dist/tests/preferences-42.js'), 'ScreenshotUtilsPreferencesChecks', {preamble: `
+await bundleLegacy('tests/preferences-checks.js', resolve('dist/tests/preferences-legacy.js'), 'ScreenshotUtilsPreferencesChecks', {preamble: `
 imports.gi.versions.Gtk = '4.0';
 imports.gi.Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.searchPath.unshift('resource:///org/gnome/Shell/Extensions/js');

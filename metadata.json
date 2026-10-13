@@ -6,6 +6,6 @@
   "version-name": "1.1",
   "url": "https://github.com/fhaefele/screenshot-utils",
   "license": "GPL-3.0-or-later",
-  "shell-version": ["46", "47", "48", "49", "50", "51"],
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "settings-schema": "org.gnome.shell.extensions.screenshot-utils"
 }

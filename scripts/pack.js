@@ -50,7 +50,7 @@ async function pack() {
             await mkdir(directory);
             for (const source of ['schemas', 'LICENSE', 'README.md'])
                 await cp(resolve(root, source), resolve(directory, source), {recursive: true});
-            const targetMetadata = {...metadata, 'shell-version': target === 'legacy' ? ['42'] : metadata['shell-version']};
+            const targetMetadata = {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']};
             await writeFile(resolve(directory, 'metadata.json'), `${JSON.stringify(targetMetadata, null, 2)}\n`);
             if (target === 'modern') {
                 for (const source of sources)
@@ -68,7 +68,7 @@ async function pack() {
             execFileSync('gnome-extensions', ['pack', '--force', ...extras.map(source => `--extra-source=${source}`),
                 '--extra-source=LICENSE', '--extra-source=README.md', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
             if (target === 'legacy') {
-                // Shell 42 neither installs nor loads uncompiled schemas.
+                // Older Shell versions need compiled schemas included in the package.
                 execFileSync('glib-compile-schemas', ['--strict', resolve(directory, 'schemas')]);
                 execFileSync('zip', ['-q', resolve(targetOutput, `${metadata.uuid}.shell-extension.zip`),
                     'schemas/gschemas.compiled'], {cwd: directory});

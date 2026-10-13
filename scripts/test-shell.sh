@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 target=${1:?Specify legacy or modern}
 major=$(gnome-shell --version | awk '{split($3, version, "."); print version[1]}')
 case "$target:$major" in
-    legacy:42|modern:46|modern:47|modern:48|modern:49|modern:50|modern:51) ;;
+    legacy:42|legacy:43|legacy:44|modern:45|modern:46|modern:47|modern:48|modern:49|modern:50|modern:51) ;;
     *) echo "Unsupported test target $target on Shell $major" >&2; exit 1 ;;
 esac
 export SCREENSHOT_UTILS_TEST_TARGET="$target"
@@ -29,7 +29,7 @@ export GSETTINGS_BACKEND=keyfile
 if test "$target" = legacy; then
     export GJS_PATH="$PWD/dist/tests"
     export SHELL_PERF_MODULE=screenshotUtils
-    export SCREENSHOT_UTILS_LEGACY_TESTS="$PWD/dist/tests/preferences-42.js"
+    export SCREENSHOT_UTILS_LEGACY_TESTS="$PWD/dist/tests/preferences-legacy.js"
 fi
 export MUTTER_WM_CLASS_FILTER=Gnome-shell-perf-helper,org.gnome.Shell.Extensions
 export LIBGL_ALWAYS_SOFTWARE=1

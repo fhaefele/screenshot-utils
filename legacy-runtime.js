@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 
-// Used only by the Shell 42 build; capture and preferences code stay shared.
+// Used by Shell 42-44 builds; capture and preferences code stay shared.
 export class Extension {
     constructor(extension) {
         this.metadata = extension.metadata ?? extension;
