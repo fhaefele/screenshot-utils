@@ -12,13 +12,21 @@ Filename tokens: `{date}` = YYYY-MM-DD, `{time}` = HH-MM-SS, `{type}`/`{N}` = ar
 
 ## Install
 
-Download the ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest). Use `screenshot-utils-gnome42-44.shell-extension.zip` for Shell 42-44, including Ubuntu 22.04, or `screenshot-utils-modern.shell-extension.zip` for Shell 45-51. Both packages use the same extension UUID, settings and capture logic:
+Download the matching ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest).
+
+Shell 42-44, including Ubuntu 22.04:
+
+```sh
+gnome-extensions install --force screenshot-utils-gnome42-44.shell-extension.zip
+```
+
+Shell 45-51:
 
 ```sh
 gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 ```
 
-After first install, log out/in, then enable in Extensions. Build from source with `npm ci && npm run pack`; ZIPs written to `dist/legacy/` and `dist/modern/`. The legacy entry points are generated from the shared source.
+After installing or updating, log out/in, then enable in Extensions. Build from source with `npm ci && npm run pack`; ZIPs written to `dist/legacy/` and `dist/modern/`. The legacy entry points are generated from the shared source.
 
 ## Keyboard shortcuts
 
@@ -42,7 +50,7 @@ npm run test:legacy # Shell 42-44
 
 CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42, Ubuntu 24.04 / Shell 46 and Ubuntu 26.04 / Shell 50. Other supported versions are validated locally with the same automated suite. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 45-51, and `test:legacy` requires Shell 42-44.
 
-For manual testing, install the ZIP above, then:
+For manual testing, install the matching ZIP above, then:
 
 ```sh
 sudo apt install mutter-dev-bin
