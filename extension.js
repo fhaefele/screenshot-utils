@@ -172,6 +172,7 @@ class CaptureButton extends PanelMenu.Button {
 export default class ScreenshotUtilsExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
+        this._lockdownSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.lockdown'});
         ensureSaveLocation(this._settings);
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
@@ -209,11 +210,18 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._settings?.disconnect(this._locationChangedId);
         this._locationChangedId = 0;
         this._settings = null;
+        this._lockdownSettings = null;
     }
 
     _checkActive(run) {
         if (!run || this._run !== run)
             throw new Error('Capture cancelled');
+    }
+
+    _checkCaptureAllowed(run) {
+        this._checkActive(run);
+        if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
+            throw new Error('Saving screenshots is disabled by system policy');
     }
 
     _requestCapture(mode, invocation) {
@@ -229,6 +237,11 @@ export default class ScreenshotUtilsExtension extends Extension {
         if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
             Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
+            return;
+        }
+        if (this._lockdownSettings.get_boolean('disable-save-to-disk')) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Saving screenshots is disabled by system policy');
             return;
         }
         if (this._busy || this._selector || this._windowSession) {
@@ -582,6 +595,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._busy = true;
         let countdown = null;
         try {
+            this._checkCaptureAllowed(run);
             await this._prepareCapture(run);
             const delay = settings.get_int('capture-delay-ms');
             if (delay > 0) {
@@ -594,7 +608,7 @@ export default class ScreenshotUtilsExtension extends Extension {
                     await this._wait(MessageTray.ANIMATION_TIME, run);
                 }
             }
-            this._checkActive(run);
+            this._checkCaptureAllowed(run);
             const screenshot = new Shell.Screenshot();
             const stream = Gio.MemoryOutputStream.new_resizable();
             try {
@@ -628,7 +642,7 @@ export default class ScreenshotUtilsExtension extends Extension {
             } finally {
                 stream.close(null);
             }
-            this._checkActive(run);
+            this._checkCaptureAllowed(run);
             const bytes = stream.steal_as_bytes();
             if (bytes.get_size() === 0)
                 throw new Error('GNOME returned an empty screenshot');
@@ -637,10 +651,10 @@ export default class ScreenshotUtilsExtension extends Extension {
             const {file, stream: output} = await this._createUniqueFile(
                 directory, settings.get_string('filename-template'), kind, run);
             try {
-                this._checkActive(run);
+                this._checkCaptureAllowed(run);
                 await this._writeBytes(output, bytes, run);
                 await output.close_async(GLib.PRIORITY_DEFAULT, run.cancellable);
-                this._checkActive(run);
+                this._checkCaptureAllowed(run);
             } catch (error) {
                 try {
                     await output.close_async(GLib.PRIORITY_DEFAULT, null);
@@ -681,7 +695,7 @@ export default class ScreenshotUtilsExtension extends Extension {
     async _writeBytes(output, bytes, run) {
         const size = bytes.get_size();
         for (let offset = 0; offset < size;) {
-            this._checkActive(run);
+            this._checkCaptureAllowed(run);
             // GBytes keeps the buffer alive throughout asynchronous writes.
             const remaining = offset ? GLib.Bytes.new_from_bytes(bytes, offset, size - offset) : bytes;
             const written = await output.write_bytes_async(remaining, GLib.PRIORITY_DEFAULT, run.cancellable);
@@ -698,7 +712,7 @@ export default class ScreenshotUtilsExtension extends Extension {
     async _createUniqueFile(directory, template, kind, run) {
         const now = new Date();
         for (let index = 0; index < 1000; index++) {
-            this._checkActive(run);
+            this._checkCaptureAllowed(run);
             const suffix = index ? `-${index + 1}` : '';
             const file = directory.get_child(buildFilename(template, now, kind, suffix));
             try {

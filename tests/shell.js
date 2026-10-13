@@ -315,12 +315,78 @@ export async function run() {
         settings.set_int('capture-delay-ms', 0);
         print('PASS: subsecond delay and exact delay preservation');
 
+        const lockdown = extension._lockdownSettings;
+        const originalCreateUniqueFile = extension._createUniqueFile;
+        settings.set_string('filename-template', 'Restricted-{N}');
+        try {
+            lockdown.set_boolean('disable-save-to-disk', true);
+            await extension._capture('screen');
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Panel capture ignored the system disk-saving restriction');
+            for (const mode of ['selection', 'screen', 'window']) {
+                const error = await requestCapture(mode).then(() => null, failure => failure);
+                assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                    `${mode} command ignored the system disk-saving restriction`);
+            }
+            assert(!extension._selector && !extension._windowSession && !extension._busy,
+                'Restricted command opened capture controls');
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 200);
+            const delayed = extension._capture('screen');
+            await Scripting.sleep(50);
+            lockdown.set_boolean('disable-save-to-disk', true);
+            await delayed;
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Delayed capture ignored a policy change');
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 0);
+            extension._createUniqueFile = async (...args) => {
+                const output = await originalCreateUniqueFile.call(extension, ...args);
+                lockdown.set_boolean('disable-save-to-disk', true);
+                return output;
+            };
+            await extension._capture('screen');
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Policy change left an incomplete screenshot file');
+        } finally {
+            extension._createUniqueFile = originalCreateUniqueFile;
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 0);
+            settings.set_string('filename-template', 'Integration-{N}');
+        }
+        print('PASS: disk-saving policy blocks panel/API captures, delayed saves and incomplete files');
+
         await Scripting.createTestWindow({width: 400, height: 300});
         await Scripting.createTestWindow({width: 600, height: 400});
         await Scripting.waitTestWindows();
         await waitUntil(() => global.get_window_actors().length >= 2, 'Test windows did not map');
         const nativeKeys = new Gio.Settings({schema_id: 'org.gnome.shell.keybindings'});
         const originalPrint = nativeKeys.get_strv('show-screenshot-ui');
+        for (const flag of ['isLocked', 'isGreeter']) {
+            const original = Main.sessionMode[flag];
+            try {
+                Main.sessionMode[flag] = true;
+                const error = await requestCapture('screen').then(() => null, failure => failure);
+                assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                    `Capture API ignored ${flag}`);
+            } finally {
+                Main.sessionMode[flag] = original;
+            }
+        }
+        const modal = new St.Widget({reactive: true});
+        Main.uiGroup.add_child(modal);
+        const grab = Main.pushModal(modal);
+        try {
+            assert(grab, 'Test could not grab modal input');
+            const error = await requestCapture('screen').then(() => null, failure => failure);
+            assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                'Capture API interrupted another modal');
+        } finally {
+            if (grab)
+                Main.popModal(grab);
+            modal.destroy();
+        }
+        print('PASS: capture API rejects locked, greeter and modal states');
         const invalidMode = await requestCapture('invalid').then(() => null, error => error);
         assert(Gio.DBusError.get_remote_error(invalidMode) === 'dev.fxth.ScreenshotUtils.InvalidMode',
             'Capture API accepted an invalid mode');

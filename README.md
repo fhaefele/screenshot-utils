@@ -28,7 +28,7 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
 ```
 
-GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences. Print Screen stays unchanged unless you explicitly reassign it.
+GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences; local session-bus clients can call them. Captures respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it.
 
 ## Test
 
