@@ -1,9 +1,13 @@
 import Adw from 'gi://Adw';
+import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import {PKGDATADIR} from 'resource:///org/gnome/Shell/Extensions/js/misc/config.js';
 import {buildFilename} from './filename.js';
 import {ensureSaveLocation} from './location.js';
 import {formatDelay, parseDelaySeconds} from './delay.js';
+
+Gio.Resource.load(`${PKGDATADIR}/gnome-shell-icons.gresource`)._register();
 
 function commitOnLeave(row, apply) {
     row.connect('apply', apply);
@@ -96,6 +100,62 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
             settings.bind(key, row, 'active', 0);
             capture.add(row);
         }
+
+        const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
+        page.add(shortcuts);
+        const shortcutContent = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
+        shortcuts.add(shortcutContent);
+        shortcutContent.append(new Gtk.Label({
+            label: 'Keyboard Settings → View and Customize Shortcuts → Custom Shortcuts → Add.',
+            xalign: 0, wrap: true, selectable: true,
+        }));
+        const commandRows = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE,
+            css_classes: ['boxed-list']});
+        shortcutContent.append(commandRows);
+        Gtk.IconTheme.get_for_display(window.get_display()).add_resource_path('/org/gnome/shell/icons');
+        for (const [mode, title, icon] of [
+            ['selection', 'Selection', 'screenshot-ui-area-symbolic'],
+            ['screen', 'Screen', 'screenshot-ui-display-symbolic'],
+            ['window', 'Window', 'screenshot-ui-window-symbolic'],
+        ]) {
+            const command = `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture ${mode}`;
+            const row = new Adw.PreferencesRow({title, activatable: false});
+            const content = new Gtk.Box({spacing: 12, margin_top: 10, margin_bottom: 10,
+                margin_start: 12, margin_end: 12});
+            row.set_child(content);
+            content.append(new Gtk.Image({icon_name: icon, pixel_size: 28, valign: Gtk.Align.CENTER}));
+            const text = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2, hexpand: true});
+            text.append(new Gtk.Label({label: title, xalign: 0, css_classes: ['caption', 'dim-label']}));
+            const commandField = new Gtk.Entry({text: command, editable: false, has_frame: false,
+                hexpand: true, width_chars: 1, css_classes: ['flat']});
+            commandField.update_property([Gtk.AccessibleProperty.LABEL], [`${title} command`]);
+            text.append(commandField);
+            content.append(text);
+            const copy = new Gtk.Button({icon_name: 'edit-copy-symbolic', valign: Gtk.Align.CENTER,
+                css_classes: ['flat'],
+                tooltip_text: `Copy ${title.toLowerCase()} command`});
+            copy.get_child().pixel_size = 16;
+            copy.update_property([Gtk.AccessibleProperty.LABEL], [`Copy ${title.toLowerCase()} command`]);
+            copy.connect('clicked', () => {
+                window.get_clipboard().set(command);
+                window.add_toast(new Adw.Toast({title: 'Command copied', timeout: 2}));
+            });
+            content.append(copy);
+            commandRows.append(row);
+        }
+        const keyboardSettings = new Gtk.Button({label: 'Keyboard Settings',
+            halign: Gtk.Align.END});
+        keyboardSettings.connect('clicked', () => {
+            try {
+                const app = Gio.AppInfo.create_from_commandline('gnome-control-center keyboard',
+                    'Keyboard Settings', Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION);
+                app.launch([], window.get_display().get_app_launch_context());
+            } catch (error) {
+                console.warn(error);
+                window.add_toast(new Adw.Toast({title: 'Could not open Keyboard Settings'}));
+            }
+        });
+        shortcutContent.append(keyboardSettings);
         window.add(page);
     }
 }

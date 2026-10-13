@@ -81,6 +81,19 @@ async function click(pointer, actor) {
     await Scripting.sleep(30);
 }
 
+function requestCapture(mode) {
+    return new Promise((resolve, reject) => Gio.DBus.session.call(
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', 'Capture',
+        new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        (connection, result) => {
+            try {
+                resolve(connection.call_finish(result));
+            } catch (error) {
+                reject(error);
+            }
+        }));
+}
+
 export async function run() {
     await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not enable');
     await waitUntil(() => !Main.layoutManager._startingUp, 'Shell startup did not finish');
@@ -337,10 +350,128 @@ export async function run() {
         settings.set_int('capture-delay-ms', 0);
         print('PASS: subsecond delay and exact delay preservation');
 
+        const lockdown = extension._lockdownSettings;
+        const originalCreateUniqueFile = extension._createUniqueFile;
+        settings.set_string('filename-template', 'Restricted-{N}');
+        try {
+            lockdown.set_boolean('disable-save-to-disk', true);
+            await extension._capture('screen');
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Panel capture ignored the system disk-saving restriction');
+            for (const mode of ['selection', 'screen', 'window']) {
+                const error = await requestCapture(mode).then(() => null, failure => failure);
+                assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                    `${mode} command ignored the system disk-saving restriction`);
+            }
+            assert(!extension._selector && !extension._windowSession && !extension._busy,
+                'Restricted command opened capture controls');
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 200);
+            const delayed = extension._capture('screen');
+            await Scripting.sleep(50);
+            lockdown.set_boolean('disable-save-to-disk', true);
+            await delayed;
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Delayed capture ignored a policy change');
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 0);
+            extension._createUniqueFile = async (...args) => {
+                const output = await originalCreateUniqueFile.call(extension, ...args);
+                lockdown.set_boolean('disable-save-to-disk', true);
+                return output;
+            };
+            await extension._capture('screen');
+            assert(!directory.get_child('Restricted-screen.png').query_exists(null),
+                'Policy change left an incomplete screenshot file');
+        } finally {
+            extension._createUniqueFile = originalCreateUniqueFile;
+            lockdown.set_boolean('disable-save-to-disk', false);
+            settings.set_int('capture-delay-ms', 0);
+            settings.set_string('filename-template', 'Integration-{N}');
+        }
+        print('PASS: disk-saving policy blocks panel/API captures, delayed saves and incomplete files');
+
         await Scripting.createTestWindow({width: 400, height: 300});
         await Scripting.createTestWindow({width: 600, height: 400});
         await Scripting.waitTestWindows();
         await waitUntil(() => global.get_window_actors().length >= 2, 'Test windows did not map');
+        const nativeKeys = new Gio.Settings({schema_id: 'org.gnome.shell.keybindings'});
+        const originalPrint = nativeKeys.get_strv('show-screenshot-ui');
+        for (const flag of ['isLocked', 'isGreeter']) {
+            const original = Main.sessionMode[flag];
+            try {
+                Main.sessionMode[flag] = true;
+                const error = await requestCapture('screen').then(() => null, failure => failure);
+                assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                    `Capture API ignored ${flag}`);
+            } finally {
+                Main.sessionMode[flag] = original;
+            }
+        }
+        const modal = new St.Widget({reactive: true});
+        Main.uiGroup.add_child(modal);
+        const grab = Main.pushModal(modal);
+        try {
+            assert(grab, 'Test could not grab modal input');
+            const error = await requestCapture('screen').then(() => null, failure => failure);
+            assert(Gio.DBusError.get_remote_error(error) === 'dev.fxth.ScreenshotUtils.Unavailable',
+                'Capture API interrupted another modal');
+        } finally {
+            if (grab)
+                Main.popModal(grab);
+            modal.destroy();
+        }
+        print('PASS: capture API rejects locked, greeter and modal states');
+        const invalidMode = await requestCapture('invalid').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(invalidMode) === 'dev.fxth.ScreenshotUtils.InvalidMode',
+            'Capture API accepted an invalid mode');
+        settings.set_string('filename-template', 'Shortcut-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        const shortcutCommand = Gio.Subprocess.new([
+            'gdbus', 'call', '--session', '--dest', 'org.gnome.Shell',
+            '--object-path', '/org/gnome/shell/extensions/screenshotutils',
+            '--method', 'dev.fxth.ScreenshotUtils.Capture', 'screen',
+        ], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        const [, commandOutput, commandError] = await new Promise((resolve, reject) =>
+            shortcutCommand.communicate_utf8_async(null, null, (process, result) => {
+                try {
+                    resolve(process.communicate_utf8_finish(result));
+                } catch (error) {
+                    reject(error);
+                }
+            }));
+        assert(shortcutCommand.get_successful() && commandOutput.trim() === '()',
+            `Documented shortcut command failed: ${commandError}`);
+        assert(extension._busy && !directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Shortcut command waited for delayed capture to finish');
+        const busyError = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(busyError) === 'dev.fxth.ScreenshotUtils.Busy',
+            'Capture API accepted overlapping captures');
+        await waitUntil(() => !extension._busy, 'Shortcut screen capture did not finish');
+        checkPng(directory, 'Shortcut-screen.png');
+        settings.set_int('capture-delay-ms', 0);
+        await requestCapture('selection');
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Shortcut did not open Selection');
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await Scripting.sleep(30);
+        pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+        await Scripting.sleep(30);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await Scripting.sleep(30);
+        pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+        await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
+        checkPng(directory, 'Shortcut-area.png');
+        await requestCapture('window');
+        await waitUntil(() => extension._windowSession && Main.screenshotUI.visible &&
+            !Main.screenshotUI._panel.visible, 'Shortcut did not open Window');
+        await Scripting.sleep(250);
+        await click(pointer, Main.screenshotUI._windowSelectors.flatMap(selector => selector.windows())[0]);
+        await waitUntil(() => !extension._windowSession && !extension._busy, 'Shortcut window capture did not finish');
+        checkPng(directory, 'Shortcut-window.png');
+        assert(JSON.stringify(nativeKeys.get_strv('show-screenshot-ui')) === JSON.stringify(originalPrint),
+            'System shortcut commands changed Print Screen');
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', '-m', GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
         ], Gio.SubprocessFlags.NONE);
@@ -600,6 +731,8 @@ export async function run() {
         Main.extensionManager.disableExtension(UUID);
         await waitUntil(() => !Main.panel.statusArea[UUID], 'Extension did not disable');
         await selection;
+        const disabledError = await requestCapture('screen').then(() => null, error => error);
+        assert(disabledError && extension._dbus === null, 'Disable left screenshot commands available');
         assert(Main.modalCount === modalCount, 'Disable leaked the region modal grab');
         print('PASS: active region cancellation on disable');
 
