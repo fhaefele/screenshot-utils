@@ -145,6 +145,35 @@ export async function run() {
         await click(pointer, button);
         await Scripting.sleep(250);
         assert(button.menu.isOpen && button.menu.actor.visible, 'Panel menu did not remain open');
+        const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        const originalScheme = themeSettings.get_string('color-scheme');
+        const controls = [button._selectionButton, button._screenButton, button._windowButton,
+            button._folderButton, button._preferencesButton];
+        const sizes = controls.map(actor => actor.get_transformed_size());
+        const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
+        try {
+            for (const scheme of ['prefer-light', 'prefer-dark']) {
+                themeSettings.set_string('color-scheme', scheme);
+                await waitUntil(() => controls.every(actor => {
+                    const node = actor.get_theme_node();
+                    const foreground = luminance(node.get_foreground_color());
+                    const background = luminance(node.get_background_color());
+                    return scheme === 'prefer-light' ? foreground < background : foreground > background;
+                }), `Capture buttons did not follow ${scheme}`);
+                await Scripting.sleep(200);
+                controls.forEach((actor, index) => {
+                    const [width, height] = actor.get_transformed_size();
+                    assert(actor.has_style_class_name('button'), 'Capture control does not use native button styling');
+                    assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
+                        'Switching color scheme changed capture control geometry');
+                });
+                await preview(`menu-${scheme}.png`);
+            }
+        } finally {
+            themeSettings.set_string('color-scheme', originalScheme);
+            await Scripting.sleep(200);
+        }
+        print('PASS: native capture/utility button colors and geometry in light and dark modes');
         for (const value of [0.163, 0.463, 0.537, 0.663, 0.427]) {
             button._delaySlider.value = value;
             assert(Math.abs(button._delaySlider.value - value) < 0.001,
