@@ -625,8 +625,14 @@ export async function run() {
             }
             await movePointer(pointer, x, y);
             await Scripting.sleep(30);
+            const session = extension._windowSession;
+            const thumbnails = nativeUi._windowSelectors.flatMap(selector => selector.windows());
+            const checkedBefore = thumbnails.map(window => window.checked);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
+            assert(extension._windowSession === session && !session.cancelled && session.selected === null &&
+                thumbnails.every((window, index) => window.checked === checkedBefore[index]),
+                'Window right-click press changed selection before cancellation');
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
             await waitUntil(() => !extension._windowSession, 'Right-click did not cancel window selection');
             assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window right-click took a screenshot');
@@ -728,6 +734,9 @@ export async function run() {
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
+        await movePointer(pointer, 350, 250);
+        assert(extension._selector?._startX === -1 && !extension._selector._rubberband.visible,
+            'Right-click press started a native region drag');
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
         await selection;
         assert(!extension._selector && !extension._busy && Main.modalCount === modalCount,

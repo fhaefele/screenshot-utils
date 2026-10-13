@@ -33,10 +33,14 @@ export function showNotification(source, title, body, openFolder) {
 export function createSecondaryClickBin(properties, onClick) {
     // A Button's click gesture can claim primary releases even with a secondary-only mask.
     const bin = new St.Bin({reactive: true, can_focus: false, ...properties});
-    bin.connect('button-release-event', (_bin, event) => {
-        if (event.get_button() !== Clutter.BUTTON_SECONDARY)
+    // Capture both phases before descendants can start a native drag or selection.
+    bin.connect('captured-event', (_bin, event) => {
+        const type = event.type();
+        if ((type !== Clutter.EventType.BUTTON_PRESS && type !== Clutter.EventType.BUTTON_RELEASE) ||
+            event.get_button() !== Clutter.BUTTON_SECONDARY)
             return Clutter.EVENT_PROPAGATE;
-        onClick();
+        if (type === Clutter.EventType.BUTTON_RELEASE)
+            onClick();
         return Clutter.EVENT_STOP;
     });
     return bin;
