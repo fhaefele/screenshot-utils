@@ -4,6 +4,7 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import {PKGDATADIR} from 'resource:///org/gnome/Shell/Extensions/js/misc/config.js';
 import {buildFilename} from './filename.js';
+import {createEntryRow, createSwitchRow} from './prefs-compat.js';
 import {ensureSaveLocation} from './location.js';
 import {formatDelay, parseDelaySeconds} from './delay.js';
 
@@ -25,7 +26,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const files = new Adw.PreferencesGroup({title: 'Files'});
         page.add(files);
 
-        const folder = new Adw.EntryRow({title: 'Screenshot folder',
+        const folder = createEntryRow({title: 'Screenshot folder',
             text: ensureSaveLocation(settings), show_apply_button: true});
         const applyFolder = () => {
             const value = folder.get_text().trim();
@@ -47,7 +48,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         });
         files.add(folder);
 
-        const template = new Adw.EntryRow({title: 'Filename template'});
+        const template = createEntryRow({title: 'Filename template'});
         template.set_text(settings.get_string('filename-template'));
         template.connect('changed', row => settings.set_string('filename-template', row.get_text()));
         files.add(template);
@@ -66,7 +67,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
 
         const capture = new Adw.PreferencesGroup({title: 'Capture'});
         page.add(capture);
-        const delay = new Adw.EntryRow({title: 'Delay (seconds)', show_apply_button: true});
+        const delay = createEntryRow({title: 'Delay (seconds)', show_apply_button: true});
         const syncDelay = () => {
             const milliseconds = settings.get_int('capture-delay-ms');
             delay.text = delayFocus.contains_focus ? String(milliseconds / 1000) : formatDelay(milliseconds);
@@ -96,8 +97,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
             ['mute-screenshot-sound', 'Mute screenshot sound'],
             ['show-notifications', 'Show notifications'],
         ]) {
-            const row = new Adw.SwitchRow({title});
-            settings.bind(key, row, 'active', 0);
+            const row = createSwitchRow(settings, key, title);
             capture.add(row);
         }
 
