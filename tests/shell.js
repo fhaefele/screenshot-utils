@@ -6,6 +6,8 @@ import St from 'gi://St';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {ensureDirectory} from '../location.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'screenshot-utils@fxth.dev';
@@ -18,7 +20,7 @@ function assert(condition, message) {
 async function waitUntil(condition, message) {
     const deadline = GLib.get_monotonic_time() + 5_000_000;
     while (!condition()) {
-        assert(GLib.get_monotonic_time() < deadline, message);
+        assert(GLib.get_monotonic_time() < deadline, typeof message === 'function' ? message() : message);
         await Scripting.sleep(20);
     }
 }
@@ -70,10 +72,22 @@ async function preview(name) {
     }
 }
 
+async function movePointer(pointer, x, y) {
+    // Initial virtual-device motion can race pointer warps in headless Mutter.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
+        await Scripting.sleep(30);
+        const [actualX, actualY] = global.get_pointer();
+        if (Math.abs(actualX - x) <= 1 && Math.abs(actualY - y) <= 1)
+            return;
+    }
+    throw new Error('Virtual pointer did not reach ' + x + ',' + y + ': ' + global.get_pointer());
+}
+
 async function click(pointer, actor) {
     const [x, y] = actor.get_transformed_position();
     const [width, height] = actor.get_transformed_size();
-    pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + width / 2, y + height / 2);
+    await movePointer(pointer, x + width / 2, y + height / 2);
     await Scripting.sleep(30);
     pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
     await Scripting.sleep(30);
@@ -95,7 +109,11 @@ function requestCapture(mode) {
 }
 
 export async function run() {
-    await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not enable');
+    await waitUntil(() => Main.panel.statusArea[UUID], () => {
+        const extension = Main.extensionManager.lookup(UUID);
+        return `Extension did not enable: state=${extension?.state}, error=${extension?.error}, ` +
+            `enabled=${global.settings.get_strv('enabled-extensions')}, disabled=${global.settings.get_boolean('disable-user-extensions')}`;
+    });
     await waitUntil(() => !Main.layoutManager._startingUp, 'Shell startup did not finish');
     Main.overview.hide();
     await Scripting.sleep(300);
@@ -132,9 +150,13 @@ export async function run() {
     settings.set_int('capture-delay-ms', 1000);
     settings.set_boolean('show-notifications', true);
     settings.set_boolean('copy-to-clipboard', true);
-    const seat = global.stage.context.get_backend().get_default_seat();
+    const seat = (global.stage.context?.get_backend() ?? Clutter.get_default_backend()).get_default_seat();
     const pointer = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const keyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    // Initialize away from hot corners, then settle any startup overview transition.
+    await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
+    Main.overview.hide();
+    await Scripting.waitLeisure();
 
     // D-Bus activation must use the test tool's isolated settings, just like Shell.
     const environment = Object.fromEntries([
@@ -158,20 +180,25 @@ export async function run() {
         await click(pointer, button);
         await Scripting.sleep(250);
         assert(button.menu.isOpen && button.menu.actor.visible, 'Panel menu did not remain open');
+        await preview('menu-initial.png');
         const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const originalScheme = themeSettings.get_string('color-scheme');
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
             button._folderButton, button._preferencesButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
+        const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
         try {
-            for (const scheme of ['prefer-light', 'prefer-dark']) {
-                themeSettings.set_string('color-scheme', scheme);
+            for (const scheme of supportsColorScheme ? ['prefer-light', 'prefer-dark'] : ['native']) {
+                if (supportsColorScheme)
+                    themeSettings.set_string('color-scheme', scheme);
                 await waitUntil(() => controls.every(actor => {
                     const node = actor.get_theme_node();
                     const foreground = luminance(node.get_foreground_color());
                     const background = luminance(node.get_background_color());
-                    return scheme === 'prefer-light' ? foreground < background : foreground > background;
+                    return supportsColorScheme
+                        ? (scheme === 'prefer-light' ? foreground < background : foreground > background)
+                        : Math.abs(foreground - background) > 40;
                 }), `Capture buttons did not follow ${scheme}`);
                 await Scripting.sleep(200);
                 controls.forEach((actor, index) => {
@@ -179,7 +206,7 @@ export async function run() {
                     const iconSize = index < 3 ? 32 : 16;
                     const [iconWidth, iconHeight] = actor.child.get_transformed_size();
                     assert(Math.abs(iconWidth - iconSize) < 1 && Math.abs(iconHeight - iconSize) < 1,
-                        `${actor.accessible_name} icon is clipped or resized`);
+                        `${actor.accessible_name} icon is clipped or resized: ${iconWidth}x${iconHeight}, expected ${iconSize}`);
                     assert(width >= iconSize + 6 && height >= iconSize + 6,
                         `${actor.accessible_name} button clips its icon`);
                     assert(actor.has_style_class_name('button'), 'Capture control does not use native button styling');
@@ -192,7 +219,7 @@ export async function run() {
             themeSettings.set_string('color-scheme', originalScheme);
             await Scripting.sleep(200);
         }
-        print('PASS: native capture/utility button colors and geometry in light and dark modes');
+        print('PASS: native capture/utility button contrast, supported color schemes and geometry');
         for (const value of [0.163, 0.463, 0.537, 0.663, 0.427]) {
             button._delaySlider.value = value;
             assert(Math.abs(button._delaySlider.value - value) < 0.001,
@@ -205,13 +232,13 @@ export async function run() {
             slider.get_parent().get_children().find(actor => actor.visible && actor instanceof St.Icon).get_transformed_size()[0],
             `Delay controls leave too little room for the slider: slider=${sliderWidth}, ` +
             `label=${button._delayLabel.width}, row=${slider.get_parent().width}, menu=${button.menu.actor.width}`);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), sliderX + sliderWidth / 2, sliderY + sliderHeight / 2);
+        await movePointer(pointer, sliderX + sliderWidth / 2, sliderY + sliderHeight / 2);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
         for (const value of [0.163, 0.237, 0.327, 0.463, 0.537, 0.663, 0.427]) {
-            const radius = slider._handleRadius;
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(),
+            const radius = slider._handleRadius ?? slider.get_theme_node().get_length('-slider-handle-radius');
+            await movePointer(pointer,
                 sliderX + radius + (sliderWidth - 2 * radius) * value, sliderY + sliderHeight / 2);
             await Scripting.sleep(50);
             assert(Math.abs(slider.value - value) < 0.025, 'Slider handle did not follow mouse movement');
@@ -243,7 +270,7 @@ export async function run() {
             [button._preferencesButton, 'preferences'], [slider, 'delay']]) {
             const [x, y] = actor.get_transformed_position();
             const [width, height] = actor.get_transformed_size();
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + width / 2, y + height / 2);
+            await movePointer(pointer, x + width / 2, y + height / 2);
             const tooltip = actor.label_actor;
             await waitUntil(() => tooltip.visible && tooltip.opacity === 255, `Missing ${name} hover tooltip`);
             assert(tooltip.y >= y + height && tooltip.y > Main.panel.get_transformed_size()[1],
@@ -301,7 +328,6 @@ export async function run() {
         settings.set_string('save-location', directory.get_path());
         settings.set_int('capture-delay-ms', 1000);
         settings.set_boolean('mute-screenshot-sound', false);
-        const {ensureDirectory} = await import(`${extension.dir.get_uri()}/location.js`);
         const cancelled = new Gio.Cancellable();
         cancelled.cancel();
         let cancellationError = null;
@@ -452,11 +478,11 @@ export async function run() {
         settings.set_int('capture-delay-ms', 0);
         await requestCapture('selection');
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Shortcut did not open Selection');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
@@ -473,7 +499,8 @@ export async function run() {
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
         const preferencesTest = Gio.Subprocess.new([
-            'gjs', '-m', GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
+            'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
+            GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
         ], Gio.SubprocessFlags.NONE);
         await new Promise((resolve, reject) => preferencesTest.wait_check_async(null, (process, result) => {
             try {
@@ -596,10 +623,16 @@ export async function run() {
                 x = windowX + width / 2;
                 y = windowY + height / 2;
             }
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
+            await movePointer(pointer, x, y);
             await Scripting.sleep(30);
+            const session = extension._windowSession;
+            const thumbnails = nativeUi._windowSelectors.flatMap(selector => selector.windows());
+            const checkedBefore = thumbnails.map(window => window.checked);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
+            assert(extension._windowSession === session && !session.cancelled && session.selected === null &&
+                thumbnails.every((window, index) => window.checked === checkedBefore[index]),
+                'Window right-click press changed selection before cancellation');
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
             await waitUntil(() => !extension._windowSession, 'Right-click did not cancel window selection');
             assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window right-click took a screenshot');
@@ -629,11 +662,11 @@ export async function run() {
 
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Region selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && !extension._busy, 'Region drag did not finish capture');
@@ -646,15 +679,15 @@ export async function run() {
         settings.set_int('capture-delay-ms', 500);
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Cursor region selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && extension._busy, 'Delayed cursor capture did not begin');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 150, 140);
+        await movePointer(pointer, 150, 140);
         await selection;
         checkPng(directory, 'Integration-area-2.png');
         const delayedCursor = pixelDifferences(directory, 'Integration-area.png', 'Integration-area-2.png');
@@ -665,12 +698,12 @@ export async function run() {
         await extension._capture('area', cursorRect);
         assert(pixelDifferences(directory, 'Integration-area.png', 'Integration-area-3.png').changed > 10,
             'Immediate region capture did not include the cursor');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 300, 140);
+        await movePointer(pointer, 300, 140);
         await Scripting.sleep(50);
         await extension._capture('area', cursorRect);
         assert(pixelDifferences(directory, 'Integration-area.png', 'Integration-area-4.png').changed === 0,
             'Region capture drew a cursor outside its bounds');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 150, 140);
+        await movePointer(pointer, 150, 140);
         await Scripting.sleep(50);
         settings.set_boolean('include-cursor', false);
         await extension._capture('area', cursorRect);
@@ -682,7 +715,7 @@ export async function run() {
             settings.set_int('capture-delay-ms', delay);
             selection = extension._selectArea();
             await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Click-cancel selector did not grab input');
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), 250, 190);
+            await movePointer(pointer, 250, 190);
             await Scripting.sleep(30);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
@@ -697,10 +730,13 @@ export async function run() {
 
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Right-click selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 250, 190);
+        await movePointer(pointer, 250, 190);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
+        await movePointer(pointer, 350, 250);
+        assert(extension._selector?._startX === -1 && !extension._selector._rubberband.visible,
+            'Right-click press started a native region drag');
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
         await selection;
         assert(!extension._selector && !extension._busy && Main.modalCount === modalCount,

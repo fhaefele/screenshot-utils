@@ -24,7 +24,8 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gnome-shell libglib2.0-bin
+          sudo apt-get install -y --no-install-recommends gnome-shell libglib2.0-bin zip unzip
+      - run: npm ci
       - name: Check release version
         if: github.ref_type == 'tag'
         run: |
@@ -37,21 +38,51 @@ jobs:
           JS
       - name: Check syntax and schemas
         run: |
-          for file in *.js tests/*.js; do node --check "$file"; done
+          for file in *.js scripts/*.js tests/*.js; do node --check "$file"; done
           glib-compile-schemas --strict --dry-run schemas
       - run: npm test
-      - run: npm run pack
+      - run: npm run test:packages
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: screenshot-utils
-          path: dist/*.shell-extension.zip
+          path: dist/*/*.shell-extension.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            test: legacy
+            mode: ubuntu
+          - os: ubuntu-24.04
+            test: gnome
+            mode: user
+          - os: ubuntu-26.04
+            test: gnome
+            mode: user
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install GNOME test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gnome-shell-extension-prefs gjs zip unzip xvfb xauth dmz-cursor-theme yaru-theme-gnome-shell librsvg2-common libgl1-mesa-dri gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0
+      - run: npm ci
+      - run: npm run test:${{ matrix.test }}
+        env:
+          SCREENSHOT_UTILS_TEST_SHELL_MODE: ${{ matrix.mode }}
+
   release:
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -68,6 +99,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp dist/legacy/*.shell-extension.zip dist/screenshot-utils-gnome42-44.shell-extension.zip
+          cp dist/modern/*.shell-extension.zip dist/screenshot-utils-modern.shell-extension.zip
           gh release create "$GITHUB_REF_NAME" dist/*.shell-extension.zip \
             --verify-tag \
             --title "Screenshot Utils ${GITHUB_REF_NAME#v}" --notes-from-tag

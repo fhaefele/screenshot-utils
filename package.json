@@ -1,9 +1,15 @@
 {
+  "name": "screenshot-utils",
   "private": true,
   "type": "module",
   "scripts": {
-    "pack": "mkdir -p dist && gnome-extensions pack --force --extra-source=filename.js --extra-source=location.js --extra-source=delay.js --extra-source=LICENSE --extra-source=README.md --out-dir=dist .",
+    "pack": "node scripts/pack.js",
     "test": "node --test tests/*.test.js",
-    "test:gnome": "npm run pack && XDG_DATA_DIRS=/usr/local/share:/usr/share dbus-run-session -- gnome-shell-test-tool --headless --extra-filter=org.gnome.Shell.Extensions --extension dist/screenshot-utils@fxth.dev.shell-extension.zip tests/shell.js"
+    "test:gnome": "npm run pack && timeout 240s scripts/test-shell.sh modern",
+    "test:legacy": "npm run pack && node scripts/legacy-tests.js && timeout 240s scripts/test-shell.sh legacy",
+    "test:packages": "npm run pack && node --test tests/packages.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

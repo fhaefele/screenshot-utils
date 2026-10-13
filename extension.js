@@ -14,6 +14,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {SelectArea, Tooltip} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 import {buildFilename} from './filename.js';
+import {connectWindowClosed, createNotificationSource, createSecondaryClickBin, showNotification} from './shell-compat.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 
@@ -97,6 +98,9 @@ class CaptureButton extends PanelMenu.Button {
             'Preferences', () => extension._openPreferences(), true);
 
         const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false});
+        // Shell 42-44 reserves an ornament label; newer versions use an icon.
+        for (const row of [menuRow, captureRow, delayRow])
+            row._ornamentLabel?.hide();
         delayRow.x_expand = true;
         delayRow.style = 'margin: 0 12px 9px;';
         rows.add_child(delayRow);
@@ -145,7 +149,8 @@ class CaptureButton extends PanelMenu.Button {
             style: utility
                 ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
                 : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
-            child: new St.Icon({icon_name: icon, icon_size: utility ? 16 : 32}),
+            child: new St.Icon({icon_name: icon, icon_size: utility ? 16 : 32,
+                x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}),
         });
         button.connect('clicked', action);
         parent.add_child(button);
@@ -155,6 +160,7 @@ class CaptureButton extends PanelMenu.Button {
 
     _addTooltip(actor, text) {
         const tooltip = new MenuTooltip(actor, {text, style_class: 'screenshot-ui-tooltip', visible: false});
+        actor.label_actor = tooltip;
         Main.uiGroup.add_child(tooltip);
         this.menu.connectObject('open-state-changed', (_menu, open) => {
             if (!open) {
@@ -205,6 +211,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._cancelWindowUi();
         this._notificationSource?.destroy();
         this._notificationSource = null;
+        if (this._soundStartupId)
+            Main.layoutManager.disconnect(this._soundStartupId);
+        this._soundStartupId = 0;
         this._injectionManager?.clear();
         this._injectionManager = null;
         this._button?.destroy();
@@ -232,7 +241,7 @@ export default class ScreenshotUtilsExtension extends Extension {
             screen: () => this._capture('screen'),
             window: () => this._openWindowUi(),
         };
-        if (!Object.hasOwn(actions, mode)) {
+        if (!Object.prototype.hasOwnProperty.call(actions, mode)) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
             return;
         }
@@ -305,6 +314,15 @@ export default class ScreenshotUtilsExtension extends Extension {
 
     _patchScreenshotSound() {
         const soundPlayer = global.display.get_sound_player();
+        if (!soundPlayer) {
+            // Shell 42 enables extensions before creating its sound player.
+            this._soundStartupId = Main.layoutManager.connect('startup-complete', () => {
+                Main.layoutManager.disconnect(this._soundStartupId);
+                this._soundStartupId = 0;
+                this._patchScreenshotSound();
+            });
+            return;
+        }
         const soundFile = Gio.File.new_for_path(CAPTURE_SOUND);
         for (const method of ['play_from_theme', 'play_from_file']) {
             this._injectionManager.overrideMethod(soundPlayer, method, originalMethod => (sound, ...args) => {
@@ -338,13 +356,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         const run = this._run;
         const selector = new SelectArea();
         let cancelled = false;
-        const hint = new St.Button({
-            layout_manager: new Clutter.BinLayout(),
-            reactive: true, can_focus: false,
-            button_mask: St.ButtonMask.THREE,
+        const hint = createSecondaryClickBin({
             accessible_name: 'Right-click to cancel selection',
-        });
-        hint.connect('clicked', async () => {
+        }, async () => {
             cancelled = true;
             try {
                 await this._wait(0, run);
@@ -354,8 +368,10 @@ export default class ScreenshotUtilsExtension extends Extension {
                 // Disabling already cancels the selector.
             }
         });
+        let hintDestroyed = false;
+        hint.connect('destroy', () => { hintDestroyed = true; });
         hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
-        hint.add_child(new St.Label({
+        hint.set_child(new St.Label({
             text: 'Esc or right-click to cancel',
             style_class: 'screenshot-ui-tooltip',
             x_align: Clutter.ActorAlign.CENTER,
@@ -380,7 +396,10 @@ export default class ScreenshotUtilsExtension extends Extension {
             if (this._run === run)
                 this._notify(`Region selection failed: ${error.message}`);
         } finally {
-            hint.destroy();
+            if (!hintDestroyed) {
+                hint.get_parent()?.remove_child(hint);
+                hint.destroy();
+            }
             if (this._selector === selector)
                 this._selector = null;
             if (!selecting)
@@ -493,7 +512,7 @@ export default class ScreenshotUtilsExtension extends Extension {
                     .find(window => window.checked);
                 await this._chooseWindow(session, session.windows.get(selected), run);
             });
-            session.closedId = ui.connect('closed', () => {
+            session.closedId = connectWindowClosed(ui, () => {
                 const selected = session.selected;
                 this._releaseWindowSession(session);
                 if (this._run === run && selected)
@@ -525,12 +544,11 @@ export default class ScreenshotUtilsExtension extends Extension {
                 const parent = selector.get_parent();
                 const index = parent.get_children().indexOf(selector);
                 parent.remove_child(selector);
-                const button = new St.Button({child: selector,
-                    reactive: true, can_focus: false, button_mask: St.ButtonMask.THREE,
-                    x_expand: true, y_expand: true, accessible_name: 'Right-click to cancel window selection'});
+                const button = createSecondaryClickBin({child: selector,
+                    x_expand: true, y_expand: true, accessible_name: 'Right-click to cancel window selection'},
+                () => this._cancelWindowSelection(session, run));
                 const wrapper = {selector, parent, index, button, destroyed: false};
                 button.connect('destroy', () => { wrapper.destroyed = true; });
-                button.connect('clicked', () => this._cancelWindowSelection(session, run));
                 parent.insert_child_at_index(button, index);
                 session.cancelWrappers.push(wrapper);
             }
@@ -746,7 +764,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         if (!this._settings?.get_boolean('show-notifications'))
             return null;
         if (!this._notificationSource) {
-            const source = new MessageTray.Source({title: 'Screenshot Utils', iconName: 'camera-photo-symbolic'});
+            const source = createNotificationSource();
             source.connect('destroy', () => {
                 if (this._notificationSource === source)
                     this._notificationSource = null;
@@ -754,9 +772,6 @@ export default class ScreenshotUtilsExtension extends Extension {
             Main.messageTray.add(source);
             this._notificationSource = source;
         }
-        const notification = new MessageTray.Notification({source: this._notificationSource, title, body});
-        notification.addAction('Open Screenshot Folder', () => this._openFolder());
-        this._notificationSource.addNotification(notification);
-        return notification;
+        return showNotification(this._notificationSource, title, body, () => this._openFolder());
     }
 }
