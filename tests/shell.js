@@ -6,6 +6,8 @@ import St from 'gi://St';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {ensureDirectory} from '../location.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'screenshot-utils@fxth.dev';
@@ -18,7 +20,7 @@ function assert(condition, message) {
 async function waitUntil(condition, message) {
     const deadline = GLib.get_monotonic_time() + 5_000_000;
     while (!condition()) {
-        assert(GLib.get_monotonic_time() < deadline, message);
+        assert(GLib.get_monotonic_time() < deadline, typeof message === 'function' ? message() : message);
         await Scripting.sleep(20);
     }
 }
@@ -95,7 +97,11 @@ function requestCapture(mode) {
 }
 
 export async function run() {
-    await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not enable');
+    await waitUntil(() => Main.panel.statusArea[UUID], () => {
+        const extension = Main.extensionManager.lookup(UUID);
+        return `Extension did not enable: state=${extension?.state}, error=${extension?.error}, ` +
+            `enabled=${global.settings.get_strv('enabled-extensions')}, disabled=${global.settings.get_boolean('disable-user-extensions')}`;
+    });
     await waitUntil(() => !Main.layoutManager._startingUp, 'Shell startup did not finish');
     Main.overview.hide();
     await Scripting.sleep(300);
@@ -132,7 +138,7 @@ export async function run() {
     settings.set_int('capture-delay-ms', 1000);
     settings.set_boolean('show-notifications', true);
     settings.set_boolean('copy-to-clipboard', true);
-    const seat = global.stage.context.get_backend().get_default_seat();
+    const seat = (global.stage.context?.get_backend() ?? Clutter.get_default_backend()).get_default_seat();
     const pointer = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const keyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
 
@@ -158,20 +164,25 @@ export async function run() {
         await click(pointer, button);
         await Scripting.sleep(250);
         assert(button.menu.isOpen && button.menu.actor.visible, 'Panel menu did not remain open');
+        await preview('menu-initial.png');
         const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const originalScheme = themeSettings.get_string('color-scheme');
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
             button._folderButton, button._preferencesButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
+        const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
         try {
-            for (const scheme of ['prefer-light', 'prefer-dark']) {
-                themeSettings.set_string('color-scheme', scheme);
+            for (const scheme of supportsColorScheme ? ['prefer-light', 'prefer-dark'] : ['native']) {
+                if (supportsColorScheme)
+                    themeSettings.set_string('color-scheme', scheme);
                 await waitUntil(() => controls.every(actor => {
                     const node = actor.get_theme_node();
                     const foreground = luminance(node.get_foreground_color());
                     const background = luminance(node.get_background_color());
-                    return scheme === 'prefer-light' ? foreground < background : foreground > background;
+                    return supportsColorScheme
+                        ? (scheme === 'prefer-light' ? foreground < background : foreground > background)
+                        : Math.abs(foreground - background) > 40;
                 }), `Capture buttons did not follow ${scheme}`);
                 await Scripting.sleep(200);
                 controls.forEach((actor, index) => {
@@ -179,7 +190,7 @@ export async function run() {
                     const iconSize = index < 3 ? 32 : 16;
                     const [iconWidth, iconHeight] = actor.child.get_transformed_size();
                     assert(Math.abs(iconWidth - iconSize) < 1 && Math.abs(iconHeight - iconSize) < 1,
-                        `${actor.accessible_name} icon is clipped or resized`);
+                        `${actor.accessible_name} icon is clipped or resized: ${iconWidth}x${iconHeight}, expected ${iconSize}`);
                     assert(width >= iconSize + 6 && height >= iconSize + 6,
                         `${actor.accessible_name} button clips its icon`);
                     assert(actor.has_style_class_name('button'), 'Capture control does not use native button styling');
@@ -192,7 +203,7 @@ export async function run() {
             themeSettings.set_string('color-scheme', originalScheme);
             await Scripting.sleep(200);
         }
-        print('PASS: native capture/utility button colors and geometry in light and dark modes');
+        print('PASS: native capture/utility button contrast, supported color schemes and geometry');
         for (const value of [0.163, 0.463, 0.537, 0.663, 0.427]) {
             button._delaySlider.value = value;
             assert(Math.abs(button._delaySlider.value - value) < 0.001,
@@ -210,7 +221,7 @@ export async function run() {
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
         for (const value of [0.163, 0.237, 0.327, 0.463, 0.537, 0.663, 0.427]) {
-            const radius = slider._handleRadius;
+            const radius = slider._handleRadius ?? slider.get_theme_node().get_length('-slider-handle-radius');
             pointer.notify_absolute_motion(GLib.get_monotonic_time(),
                 sliderX + radius + (sliderWidth - 2 * radius) * value, sliderY + sliderHeight / 2);
             await Scripting.sleep(50);
@@ -301,7 +312,6 @@ export async function run() {
         settings.set_string('save-location', directory.get_path());
         settings.set_int('capture-delay-ms', 1000);
         settings.set_boolean('mute-screenshot-sound', false);
-        const {ensureDirectory} = await import(`${extension.dir.get_uri()}/location.js`);
         const cancelled = new Gio.Cancellable();
         cancelled.cancel();
         let cancellationError = null;
@@ -473,7 +483,8 @@ export async function run() {
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
         const preferencesTest = Gio.Subprocess.new([
-            'gjs', '-m', GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
+            'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
+            GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
         ], Gio.SubprocessFlags.NONE);
         await new Promise((resolve, reject) => preferencesTest.wait_check_async(null, (process, result) => {
             try {
