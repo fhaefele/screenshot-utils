@@ -40,7 +40,7 @@ npm run test:gnome  # Shell 45-51
 npm run test:legacy # Shell 42-44
 ```
 
-CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42 and Ubuntu 24.04 / Shell 46. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 45-51, and `test:legacy` requires Shell 42-44.
+CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42, Ubuntu 24.04 / Shell 46 and Ubuntu 26.04 / Shell 50. Other supported versions are validated locally with the same automated suite. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 45-51, and `test:legacy` requires Shell 42-44.
 
 For manual testing, install the ZIP above, then:
 

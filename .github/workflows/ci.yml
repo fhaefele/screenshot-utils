@@ -61,6 +61,9 @@ jobs:
           - os: ubuntu-24.04
             test: gnome
             mode: user
+          - os: ubuntu-26.04
+            test: gnome
+            mode: user
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
