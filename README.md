@@ -18,6 +18,18 @@ gnome-extensions install --force screenshot-utils@fxth.dev.shell-extension.zip
 
 After first install, log out/in, then enable in Extensions. Build from source with `npm run pack`; ZIP written to `dist/`.
 
+## Keyboard shortcuts
+
+In Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts, add a name, one command below and your chosen key:
+
+```sh
+gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture selection
+gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture screen
+gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture window
+```
+
+GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences. Print Screen stays unchanged unless you explicitly reassign it.
+
 ## Test
 
 ```sh
@@ -34,7 +46,7 @@ sudo apt install mutter-dev-bin
 XDG_DATA_DIRS=/usr/local/share:/usr/share dbus-run-session -- gnome-shell --devkit --wayland
 ```
 
-Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Repack/reinstall and restart the nested Shell after changes. Shell 46-48 uses `--nested` instead of `--devkit`.
+Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, custom shortcuts, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Repack/reinstall and restart the nested Shell after changes. Shell 46-48 uses `--nested` instead of `--devkit`.
 
 Live-tested on Shell 50.1. Shell 46-49/51, multiple monitors and fractional scaling need live testing. Manual nested testing uses your normal folders and preferences. Print Screen still opens GNOME's own screenshot UI.
 

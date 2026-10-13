@@ -19,6 +19,13 @@ import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
+const CAPTURE_INTERFACE = `<node>
+    <interface name="dev.fxth.ScreenshotUtils">
+        <method name="Capture">
+            <arg type="s" name="mode" direction="in"/>
+        </method>
+    </interface>
+</node>`;
 
 for (const method of ['screenshot', 'screenshot_window', 'screenshot_area', 'screenshot_stage_to_content'])
     Gio._promisify(Shell.Screenshot.prototype, method);
@@ -177,11 +184,17 @@ export default class ScreenshotUtilsExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._button);
         this._injectionManager = new InjectionManager();
         this._patchScreenshotSound();
+        this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
+            CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
+        });
+        this._dbus.export(Gio.DBus.session, '/dev/fxth/ScreenshotUtils');
     }
 
     disable() {
         const run = this._run;
         this._run = null;
+        this._dbus?.unexport();
+        this._dbus = null;
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
@@ -201,6 +214,34 @@ export default class ScreenshotUtilsExtension extends Extension {
     _checkActive(run) {
         if (!run || this._run !== run)
             throw new Error('Capture cancelled');
+    }
+
+    _requestCapture(mode, invocation) {
+        const actions = {
+            selection: () => this._selectArea(),
+            screen: () => this._capture('screen'),
+            window: () => this._openWindowUi(),
+        };
+        if (!Object.hasOwn(actions, mode)) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
+            return;
+        }
+        if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
+            Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
+            return;
+        }
+        if (this._busy || this._selector || this._windowSession) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
+            return;
+        }
+        const run = this._run;
+        actions[mode]().catch(error => {
+            if (this._run === run)
+                this._notify(`Screenshot failed: ${error.message}`);
+        });
+        // The shortcut command exits immediately; the picker/delay continues in Shell.
+        invocation.return_value(null);
     }
 
     _wait(milliseconds, run, object = null, signal = null, isReady = null) {

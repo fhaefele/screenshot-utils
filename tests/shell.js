@@ -81,6 +81,19 @@ async function click(pointer, actor) {
     await Scripting.sleep(30);
 }
 
+function requestCapture(mode) {
+    return new Promise((resolve, reject) => Gio.DBus.session.call(
+        'org.gnome.Shell', '/dev/fxth/ScreenshotUtils', 'dev.fxth.ScreenshotUtils', 'Capture',
+        new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        (connection, result) => {
+            try {
+                resolve(connection.call_finish(result));
+            } catch (error) {
+                reject(error);
+            }
+        }));
+}
+
 export async function run() {
     await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not enable');
     await waitUntil(() => !Main.layoutManager._startingUp, 'Shell startup did not finish');
@@ -306,6 +319,58 @@ export async function run() {
         await Scripting.createTestWindow({width: 600, height: 400});
         await Scripting.waitTestWindows();
         await waitUntil(() => global.get_window_actors().length >= 2, 'Test windows did not map');
+        const nativeKeys = new Gio.Settings({schema_id: 'org.gnome.shell.keybindings'});
+        const originalPrint = nativeKeys.get_strv('show-screenshot-ui');
+        const invalidMode = await requestCapture('invalid').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(invalidMode) === 'dev.fxth.ScreenshotUtils.InvalidMode',
+            'Capture API accepted an invalid mode');
+        settings.set_string('filename-template', 'Shortcut-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        const shortcutCommand = Gio.Subprocess.new([
+            'gdbus', 'call', '--session', '--dest', 'org.gnome.Shell',
+            '--object-path', '/dev/fxth/ScreenshotUtils',
+            '--method', 'dev.fxth.ScreenshotUtils.Capture', 'screen',
+        ], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        const [, commandOutput, commandError] = await new Promise((resolve, reject) =>
+            shortcutCommand.communicate_utf8_async(null, null, (process, result) => {
+                try {
+                    resolve(process.communicate_utf8_finish(result));
+                } catch (error) {
+                    reject(error);
+                }
+            }));
+        assert(shortcutCommand.get_successful() && commandOutput.trim() === '()',
+            `Documented shortcut command failed: ${commandError}`);
+        assert(extension._busy && !directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Shortcut command waited for delayed capture to finish');
+        const busyError = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(busyError) === 'dev.fxth.ScreenshotUtils.Busy',
+            'Capture API accepted overlapping captures');
+        await waitUntil(() => !extension._busy, 'Shortcut screen capture did not finish');
+        checkPng(directory, 'Shortcut-screen.png');
+        settings.set_int('capture-delay-ms', 0);
+        await requestCapture('selection');
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Shortcut did not open Selection');
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await Scripting.sleep(30);
+        pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+        await Scripting.sleep(30);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await Scripting.sleep(30);
+        pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+        await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
+        checkPng(directory, 'Shortcut-area.png');
+        await requestCapture('window');
+        await waitUntil(() => extension._windowSession && Main.screenshotUI.visible &&
+            !Main.screenshotUI._panel.visible, 'Shortcut did not open Window');
+        await Scripting.sleep(250);
+        await click(pointer, Main.screenshotUI._windowSelectors.flatMap(selector => selector.windows())[0]);
+        await waitUntil(() => !extension._windowSession && !extension._busy, 'Shortcut window capture did not finish');
+        checkPng(directory, 'Shortcut-window.png');
+        assert(JSON.stringify(nativeKeys.get_strv('show-screenshot-ui')) === JSON.stringify(originalPrint),
+            'System shortcut commands changed Print Screen');
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', '-m', GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,
         ], Gio.SubprocessFlags.NONE);
@@ -565,6 +630,8 @@ export async function run() {
         Main.extensionManager.disableExtension(UUID);
         await waitUntil(() => !Main.panel.statusArea[UUID], 'Extension did not disable');
         await selection;
+        const disabledError = await requestCapture('screen').then(() => null, error => error);
+        assert(disabledError && extension._dbus === null, 'Disable left screenshot commands available');
         assert(Main.modalCount === modalCount, 'Disable leaked the region modal grab');
         print('PASS: active region cancellation on disable');
 
