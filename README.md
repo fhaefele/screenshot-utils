@@ -2,7 +2,7 @@
 
 Native screenshots for GNOME Shell 46-51 on Wayland, including Ubuntu 24.04/26.04.
 
-![Screenshot Utils capture menu and preferences](assets/screenshot-utils.png)
+![Screenshot Utils capture menu and preferences](https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/assets/screenshot-utils.png)
 
 - Selection, Screen and Window capture. Release a selection or click a window to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
 - Stepped delay: 0-30 seconds. Exact seconds, save folder, filenames, mouse pointer, clipboard, sound and notifications in Preferences. Sound mute also applies to GNOME's native screenshots.
