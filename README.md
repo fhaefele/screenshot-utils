@@ -20,12 +20,12 @@ After first install, log out/in, then enable in Extensions. Build from source wi
 
 ## Keyboard shortcuts
 
-In Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts, add a name, one command below and your chosen key:
+Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
 
 ```sh
-gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture selection
-gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture screen
-gdbus call --session --dest org.gnome.Shell --object-path /dev/fxth/ScreenshotUtils --method dev.fxth.ScreenshotUtils.Capture window
+gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
+gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture screen
+gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
 ```
 
 GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences. Print Screen stays unchanged unless you explicitly reassign it.

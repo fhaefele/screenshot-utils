@@ -187,7 +187,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
         });
-        this._dbus.export(Gio.DBus.session, '/dev/fxth/ScreenshotUtils');
+        this._dbus.export(Gio.DBus.session, '/org/gnome/shell/extensions/screenshotutils');
     }
 
     disable() {

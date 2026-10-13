@@ -83,7 +83,7 @@ async function click(pointer, actor) {
 
 function requestCapture(mode) {
     return new Promise((resolve, reject) => Gio.DBus.session.call(
-        'org.gnome.Shell', '/dev/fxth/ScreenshotUtils', 'dev.fxth.ScreenshotUtils', 'Capture',
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', 'Capture',
         new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
         (connection, result) => {
             try {
@@ -328,7 +328,7 @@ export async function run() {
         settings.set_int('capture-delay-ms', 1000);
         const shortcutCommand = Gio.Subprocess.new([
             'gdbus', 'call', '--session', '--dest', 'org.gnome.Shell',
-            '--object-path', '/dev/fxth/ScreenshotUtils',
+            '--object-path', '/org/gnome/shell/extensions/screenshotutils',
             '--method', 'dev.fxth.ScreenshotUtils.Capture', 'screen',
         ], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
         const [, commandOutput, commandError] = await new Promise((resolve, reject) =>

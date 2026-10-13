@@ -15,6 +15,17 @@ function descendants(widget) {
     return result;
 }
 
+function clipboardText(window) {
+    return new Promise((resolve, reject) => window.get_clipboard().read_text_async(null,
+        (clipboard, result) => {
+            try {
+                resolve(clipboard.read_text_finish(result));
+            } catch (error) {
+                reject(error);
+            }
+        }));
+}
+
 Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.package.init({name: 'gnome-shell', prefix: '/usr', libdir: '/usr/lib'});
 const path = ARGV[0];
@@ -69,6 +80,71 @@ try {
         assert(settings.get_int('capture-delay-ms') === 2500 && delay.text === '2.5 s',
             'Preferences accepted invalid seconds');
     }
+
+    const shortcuts = widgets.find(widget => widget instanceof Adw.PreferencesGroup &&
+        widget.title === 'Keyboard Shortcuts');
+    assert(shortcuts, 'Keyboard shortcut instructions are missing');
+    const shortcutWidgets = descendants(shortcuts);
+    const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
+        widget.label.startsWith('Keyboard Settings →'));
+    assert(instructions && !instructions.has_css_class('caption') && !instructions.has_css_class('dim-label'),
+        'Keyboard shortcut instructions are missing or styled as a small note');
+    const commandRows = instructions.get_next_sibling();
+    assert(instructions.get_parent().get_first_child() === instructions && commandRows instanceof Gtk.ListBox,
+        'Keyboard shortcut instructions are not directly above the commands');
+    const toasts = [];
+    const originalAddToast = window.add_toast;
+    window.add_toast = toast => {
+        toasts.push(toast.title);
+        originalAddToast.call(window, toast);
+    };
+    for (const [mode, title, icon] of [
+        ['selection', 'Selection', 'screenshot-ui-area-symbolic'],
+        ['screen', 'Screen', 'screenshot-ui-display-symbolic'],
+        ['window', 'Window', 'screenshot-ui-window-symbolic'],
+    ]) {
+        const row = shortcutWidgets.find(widget => widget instanceof Adw.PreferencesRow && widget.title === title);
+        const expectedCommand = `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture ${mode}`;
+        assert(row, `${title} command row is missing`);
+        const rowWidgets = descendants(row);
+        const commandField = rowWidgets.find(widget => widget instanceof Gtk.Entry);
+        assert(commandField?.text === expectedCommand && !commandField.editable && !commandField.has_frame,
+            `${title} command is not a read-only single-line text field`);
+        assert(rowWidgets.some(widget => widget instanceof Gtk.Image && widget.icon_name === icon && widget.pixel_size === 28) &&
+            Gtk.IconTheme.get_for_display(window.get_display()).has_icon(icon), `${title} capture icon is missing`);
+        const copy = rowWidgets.find(widget => widget instanceof Gtk.Button && widget.icon_name === 'edit-copy-symbolic');
+        assert(copy?.get_child().pixel_size === 16, `${title} command has no small standard copy icon`);
+        copy.emit('clicked');
+        assert(await clipboardText(window) === expectedCommand,
+            `${title} Copy button put the wrong command on the clipboard`);
+        assert(toasts.at(-1) === 'Command copied', 'Copy button did not show confirmation');
+        commandField.select_region(0, -1);
+        commandField.get_delegate().emit('copy-clipboard');
+        assert(await clipboardText(window) === expectedCommand,
+            `${title} text selection did not copy the complete command`);
+    }
+    const openKeyboardSettings = shortcutWidgets.find(widget => widget instanceof Gtk.Button &&
+        widget.label === 'Keyboard Settings');
+    assert(openKeyboardSettings, 'Keyboard Settings button is missing');
+    const originalCreateApp = Gio.AppInfo.create_from_commandline;
+    try {
+        let launched = false;
+        Gio.AppInfo.create_from_commandline = (command, _name, flags) => {
+            assert(command === 'gnome-control-center keyboard', 'Wrong Keyboard Settings command');
+            assert(flags === Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION,
+                'Keyboard Settings launch has no activation context');
+            return {launch: (files, context) => { launched = files.length === 0 && context !== null; }};
+        };
+        openKeyboardSettings.emit('clicked');
+        assert(launched, 'Keyboard Settings button did not launch the panel');
+        Gio.AppInfo.create_from_commandline = () => { throw new Error('Keyboard Settings unavailable in test'); };
+        openKeyboardSettings.emit('clicked');
+        assert(toasts.at(-1) === 'Could not open Keyboard Settings', 'Launch failure has no feedback');
+    } finally {
+        Gio.AppInfo.create_from_commandline = originalCreateApp;
+        window.add_toast = originalAddToast;
+    }
+    print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard Settings launch');
 
     const unchangedPreview = preview.label;
     const loop = new GLib.MainLoop(null, false);
