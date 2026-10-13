@@ -2,7 +2,8 @@ import Adw from 'gi://Adw';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
-// Match EntryRow's editing and apply signals on libadwaita 1.1.
+// Adw 1.1 fallback keeps editing/apply signals and an explicitly labeled entry.
+// Apply stays visible; native EntryRow styling and accessibility relations aren't reproduced.
 const LegacyEntryRow = GObject.registerClass({
     Signals: {apply: {}, changed: {}},
 }, class LegacyEntryRow extends Adw.ActionRow {
@@ -42,4 +43,3 @@ export function createSwitchRow(settings, key, title) {
     settings.bind(key, control, 'active', 0);
     return row;
 }
-

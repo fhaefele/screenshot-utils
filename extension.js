@@ -98,6 +98,7 @@ class CaptureButton extends PanelMenu.Button {
             'Preferences', () => extension._openPreferences(), true);
 
         const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false});
+        // Shell 42-44 reserves an ornament label; newer versions use an icon.
         for (const row of [menuRow, captureRow, delayRow])
             row._ornamentLabel?.hide();
         delayRow.x_expand = true;
