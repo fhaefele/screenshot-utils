@@ -72,10 +72,22 @@ async function preview(name) {
     }
 }
 
+async function movePointer(pointer, x, y) {
+    // Initial virtual-device motion can race pointer warps in headless Mutter.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
+        await Scripting.sleep(30);
+        const [actualX, actualY] = global.get_pointer();
+        if (Math.abs(actualX - x) <= 1 && Math.abs(actualY - y) <= 1)
+            return;
+    }
+    throw new Error('Virtual pointer did not reach ' + x + ',' + y + ': ' + global.get_pointer());
+}
+
 async function click(pointer, actor) {
     const [x, y] = actor.get_transformed_position();
     const [width, height] = actor.get_transformed_size();
-    pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + width / 2, y + height / 2);
+    await movePointer(pointer, x + width / 2, y + height / 2);
     await Scripting.sleep(30);
     pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
     await Scripting.sleep(30);
@@ -141,6 +153,10 @@ export async function run() {
     const seat = (global.stage.context?.get_backend() ?? Clutter.get_default_backend()).get_default_seat();
     const pointer = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const keyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    // Initialize away from hot corners, then settle any startup overview transition.
+    await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
+    Main.overview.hide();
+    await Scripting.waitLeisure();
 
     // D-Bus activation must use the test tool's isolated settings, just like Shell.
     const environment = Object.fromEntries([
@@ -216,13 +232,13 @@ export async function run() {
             slider.get_parent().get_children().find(actor => actor.visible && actor instanceof St.Icon).get_transformed_size()[0],
             `Delay controls leave too little room for the slider: slider=${sliderWidth}, ` +
             `label=${button._delayLabel.width}, row=${slider.get_parent().width}, menu=${button.menu.actor.width}`);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), sliderX + sliderWidth / 2, sliderY + sliderHeight / 2);
+        await movePointer(pointer, sliderX + sliderWidth / 2, sliderY + sliderHeight / 2);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
         for (const value of [0.163, 0.237, 0.327, 0.463, 0.537, 0.663, 0.427]) {
             const radius = slider._handleRadius ?? slider.get_theme_node().get_length('-slider-handle-radius');
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(),
+            await movePointer(pointer,
                 sliderX + radius + (sliderWidth - 2 * radius) * value, sliderY + sliderHeight / 2);
             await Scripting.sleep(50);
             assert(Math.abs(slider.value - value) < 0.025, 'Slider handle did not follow mouse movement');
@@ -254,7 +270,7 @@ export async function run() {
             [button._preferencesButton, 'preferences'], [slider, 'delay']]) {
             const [x, y] = actor.get_transformed_position();
             const [width, height] = actor.get_transformed_size();
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + width / 2, y + height / 2);
+            await movePointer(pointer, x + width / 2, y + height / 2);
             const tooltip = actor.label_actor;
             await waitUntil(() => tooltip.visible && tooltip.opacity === 255, `Missing ${name} hover tooltip`);
             assert(tooltip.y >= y + height && tooltip.y > Main.panel.get_transformed_size()[1],
@@ -462,11 +478,11 @@ export async function run() {
         settings.set_int('capture-delay-ms', 0);
         await requestCapture('selection');
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Shortcut did not open Selection');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
@@ -607,7 +623,7 @@ export async function run() {
                 x = windowX + width / 2;
                 y = windowY + height / 2;
             }
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
+            await movePointer(pointer, x, y);
             await Scripting.sleep(30);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
@@ -640,11 +656,11 @@ export async function run() {
 
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Region selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && !extension._busy, 'Region drag did not finish capture');
@@ -657,15 +673,15 @@ export async function run() {
         settings.set_int('capture-delay-ms', 500);
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Cursor region selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 100, 100);
+        await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 200, 180);
+        await movePointer(pointer, 200, 180);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await waitUntil(() => !extension._selector && extension._busy, 'Delayed cursor capture did not begin');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 150, 140);
+        await movePointer(pointer, 150, 140);
         await selection;
         checkPng(directory, 'Integration-area-2.png');
         const delayedCursor = pixelDifferences(directory, 'Integration-area.png', 'Integration-area-2.png');
@@ -676,12 +692,12 @@ export async function run() {
         await extension._capture('area', cursorRect);
         assert(pixelDifferences(directory, 'Integration-area.png', 'Integration-area-3.png').changed > 10,
             'Immediate region capture did not include the cursor');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 300, 140);
+        await movePointer(pointer, 300, 140);
         await Scripting.sleep(50);
         await extension._capture('area', cursorRect);
         assert(pixelDifferences(directory, 'Integration-area.png', 'Integration-area-4.png').changed === 0,
             'Region capture drew a cursor outside its bounds');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 150, 140);
+        await movePointer(pointer, 150, 140);
         await Scripting.sleep(50);
         settings.set_boolean('include-cursor', false);
         await extension._capture('area', cursorRect);
@@ -693,7 +709,7 @@ export async function run() {
             settings.set_int('capture-delay-ms', delay);
             selection = extension._selectArea();
             await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Click-cancel selector did not grab input');
-            pointer.notify_absolute_motion(GLib.get_monotonic_time(), 250, 190);
+            await movePointer(pointer, 250, 190);
             await Scripting.sleep(30);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
@@ -708,7 +724,7 @@ export async function run() {
 
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Right-click selector did not grab input');
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 250, 190);
+        await movePointer(pointer, 250, 190);
         await Scripting.sleep(30);
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
         await Scripting.sleep(30);

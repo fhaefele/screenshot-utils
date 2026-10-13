@@ -14,7 +14,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {SelectArea, Tooltip} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 import {buildFilename} from './filename.js';
-import {connectWindowClosed, createNotificationSource, showNotification} from './shell-compat.js';
+import {connectWindowClosed, createNotificationSource, createSecondaryClickBin, showNotification} from './shell-compat.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 
@@ -355,15 +355,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         const run = this._run;
         const selector = new SelectArea();
         let cancelled = false;
-        const hint = new St.Button({
-            layout_manager: new Clutter.BinLayout(),
-            reactive: true, can_focus: false,
-            button_mask: St.ButtonMask.THREE,
+        const hint = createSecondaryClickBin({
             accessible_name: 'Right-click to cancel selection',
-        });
-        let hintDestroyed = false;
-        hint.connect('destroy', () => { hintDestroyed = true; });
-        hint.connect('clicked', async () => {
+        }, async () => {
             cancelled = true;
             try {
                 await this._wait(0, run);
@@ -373,6 +367,8 @@ export default class ScreenshotUtilsExtension extends Extension {
                 // Disabling already cancels the selector.
             }
         });
+        let hintDestroyed = false;
+        hint.connect('destroy', () => { hintDestroyed = true; });
         hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
         hint.set_child(new St.Label({
             text: 'Esc or right-click to cancel',
@@ -547,12 +543,11 @@ export default class ScreenshotUtilsExtension extends Extension {
                 const parent = selector.get_parent();
                 const index = parent.get_children().indexOf(selector);
                 parent.remove_child(selector);
-                const button = new St.Button({child: selector,
-                    reactive: true, can_focus: false, button_mask: St.ButtonMask.THREE,
-                    x_expand: true, y_expand: true, accessible_name: 'Right-click to cancel window selection'});
+                const button = createSecondaryClickBin({child: selector,
+                    x_expand: true, y_expand: true, accessible_name: 'Right-click to cancel window selection'},
+                () => this._cancelWindowSelection(session, run));
                 const wrapper = {selector, parent, index, button, destroyed: false};
                 button.connect('destroy', () => { wrapper.destroyed = true; });
-                button.connect('clicked', () => this._cancelWindowSelection(session, run));
                 parent.insert_child_at_index(button, index);
                 session.cancelWrappers.push(wrapper);
             }
