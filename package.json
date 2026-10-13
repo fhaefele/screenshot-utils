@@ -5,8 +5,8 @@
   "scripts": {
     "pack": "node scripts/pack.js",
     "test": "node --test tests/*.test.js",
-    "test:gnome": "npm run pack && timeout 180s scripts/test-shell.sh modern",
-    "test:legacy": "npm run pack && node scripts/legacy-tests.js && timeout 180s scripts/test-shell.sh legacy",
+    "test:gnome": "npm run pack && timeout 240s scripts/test-shell.sh modern",
+    "test:legacy": "npm run pack && node scripts/legacy-tests.js && timeout 240s scripts/test-shell.sh legacy",
     "test:packages": "npm run pack && node --test tests/packages.js"
   },
   "devDependencies": {

@@ -8,6 +8,7 @@ case "$target:$major" in
     *) echo "Unsupported test target $target on Shell $major" >&2; exit 1 ;;
 esac
 export SCREENSHOT_UTILS_TEST_TARGET="$target"
+printf "GNOME %s: preparing %s test session\n" "$major" "$target"
 test_root=$(mktemp -d)
 cleanup() {
     result=$?
@@ -38,10 +39,12 @@ unset DBUS_SESSION_BUS_ADDRESS DISPLAY
 # Keep the entire desktop, its settings and its D-Bus activation isolated.
 dbus-run-session -- sh -eu -c '
     export DBUS_SYSTEM_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"
+    printf "Installing %s test package\n" "$SCREENSHOT_UTILS_TEST_TARGET"
     gnome-extensions install --force "dist/$SCREENSHOT_UTILS_TEST_TARGET/screenshot-utils@fxth.dev.shell-extension.zip"
     gsettings set org.gnome.shell enabled-extensions "[\"screenshot-utils@fxth.dev\"]"
     gsettings set org.gnome.desktop.interface cursor-theme DMZ-White
     gsettings set org.gnome.shell welcome-dialog-last-shown-version "99"
+    printf "Starting %s Shell integration suite\n" "$SCREENSHOT_UTILS_TEST_TARGET"
     if test "$SCREENSHOT_UTILS_TEST_TARGET" = modern; then
         set -- --automation-script "$PWD/tests/shell.js" --force-animations
     else
