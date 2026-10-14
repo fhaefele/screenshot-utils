@@ -40,9 +40,11 @@ function shortcutRecorder(parent, title, onSelected) {
             return true;
         }
         if (!modifiers && (keyval === Gdk.KEY_Return || keyval === Gdk.KEY_KP_Enter) && apply.sensitive) {
-            apply.emit('clicked');
+            (window.get_focus() === cancel ? cancel : apply).emit('clicked');
             return true;
         }
+        if (!modifiers && keyval === Gdk.KEY_space && window.get_focus() instanceof Gtk.Button)
+            return false;
         if ((keyval === Gdk.KEY_Tab || keyval === Gdk.KEY_ISO_Left_Tab) &&
             !(modifiers & ~Gdk.ModifierType.SHIFT_MASK))
             return false;
@@ -57,6 +59,7 @@ function shortcutRecorder(parent, title, onSelected) {
         label.accelerator = accelerator;
         hint.label = '';
         apply.sensitive = true;
+        apply.grab_focus();
         return true;
     });
     window.add_controller(controller);
@@ -82,16 +85,18 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     page.add(shortcuts);
     const setup = new Adw.ComboRow({title: 'Shortcut setup',
         model: Gtk.StringList.new(['GNOME Keyboard Settings', 'Extension preferences']),
-        selected: settings.get_string('shortcut-setup') === 'extension' ? 1 : 0});
+        selected: settings.get_string('shortcut-setup') === 'extension' ? 1 : 0, use_subtitle: true});
     shortcuts.add(setup);
     const commands = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     shortcuts.add(commands);
+    const commandOptions = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list']});
+    commands.append(commandOptions);
     const allowCommands = createSwitchRow(settings, 'enable-shortcut-commands', 'Allow shortcut commands');
     allowCommands.subtitle = 'Allows local applications to request screenshots through the commands below.';
-    commands.append(allowCommands);
+    commandOptions.append(allowCommands);
     const {row: ask, control: askControl} = createToggleRow('Ask before screenshots from commands');
     ask.subtitle = 'Turning this off requires approval in GNOME Shell. Any local program can then request screenshots without asking.';
-    commands.append(ask);
+    commandOptions.append(ask);
     commands.append(new Gtk.Label({
         label: 'Session approval resets when permission changes, the extension is disabled or GNOME Shell restarts. Locking may disable the extension.',
         xalign: 0, wrap: true, css_classes: ['dim-label'],

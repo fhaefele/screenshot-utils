@@ -45,6 +45,31 @@ function folderChoosers() {
         .filter(window => window instanceof Gtk.FileChooserDialog && window.visible);
 }
 
+// Use the real bus and Shell dialog here, separately from the widget checks.
+export async function checkSessionApprovalPreferences(preferences) {
+    const settings = preferences.getSettings();
+    const window = new Adw.PreferencesWindow();
+    try {
+        preferences.fillPreferencesWindow(window);
+        window.present();
+        const widgets = descendants(window);
+        const ask = widgets.find(widget => widget instanceof Adw.ActionRow &&
+            widget.title === 'Ask before screenshots from commands');
+        const control = Adw.SwitchRow ? ask : descendants(ask).find(widget => widget instanceof Gtk.Switch);
+        const approve = widgets.find(widget => widget instanceof Gtk.Button && widget.label === 'Approve for this session');
+        control.active = false;
+        await waitUntil(() => approve.label === 'Approved for this session', 'Actual preference toggle did not receive session approval');
+        assert(!approve.sensitive, 'Approved session still offers redundant approval');
+        settings.set_boolean('ask-command-confirmation', true);
+        await waitUntil(() => control.active && !approve.visible && approve.label === 'Approve for this session',
+            'Actual approval revocation did not update preferences');
+        print('PASS: actual preferences toggle, Shell dialog and live approval/revocation feedback');
+    } finally {
+        window.close();
+        settings.set_boolean('ask-command-confirmation', true);
+    }
+}
+
 export async function checkPreferences(preferences) {
     const settings = preferences.getSettings();
     const previousFolder = settings.get_string('save-location');
@@ -223,6 +248,16 @@ export async function checkPreferences(preferences) {
         assert(settings.get_string('shortcut-selection') === '<Control>F11', 'Recorder did not save captured keys');
         clearShortcut.emit('clicked');
         assert(settings.get_string('shortcut-selection') === '' && !clearShortcut.sensitive, 'Clear did not remove the shortcut');
+        setShortcut.emit('clicked');
+        const cancelledRecorder = Array.from({length: Gtk.Window.get_toplevels().get_n_items()}, (_, index) =>
+            Gtk.Window.get_toplevels().get_item(index)).find(candidate => candidate.title === 'Set selection shortcut');
+        const cancelledControllers = cancelledRecorder.observe_controllers();
+        const cancelledKeys = Array.from({length: cancelledControllers.get_n_items()}, (_, index) => cancelledControllers.get_item(index))
+            .find(controller => controller instanceof Gtk.EventControllerKey);
+        cancelledKeys.emit('key-pressed', Gdk.KEY_F12, 96, Gdk.ModifierType.CONTROL_MASK);
+        descendants(cancelledRecorder).find(widget => widget instanceof Gtk.Button && widget.label === 'Cancel').grab_focus();
+        cancelledKeys.emit('key-pressed', Gdk.KEY_Return, 36, 0);
+        assert(settings.get_string('shortcut-selection') === '', 'Keyboard Cancel saved a shortcut');
         setup.selected = 0;
         assert(instructions.get_parent().get_parent().visible, 'GNOME setup did not restore command instructions');
         settings.set_boolean('enable-shortcut-commands', previousCommands);

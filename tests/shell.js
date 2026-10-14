@@ -744,6 +744,24 @@ export async function run() {
         settings.set_boolean('ask-command-confirmation', true);
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: real native keypresses, all modes, conflicts, external-command isolation and complete shortcut cleanup');
+        const approvalPreferencesTest = Gio.Subprocess.new([
+            'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
+            GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']),
+            extension.path, 'approval',
+        ], Gio.SubprocessFlags.NONE);
+        await waitUntil(() => extension._commandDialog?.visible, 'Actual preferences toggle did not open Shell approval');
+        assert(extension._commandDialog.session, 'Actual preferences requested per-capture approval instead of session consent');
+        await allowCommand();
+        await new Promise((resolve, reject) => approvalPreferencesTest.wait_check_async(null, (process, result) => {
+            try {
+                process.wait_check_finish(result);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        }));
+        await waitUntil(() => !extension._busy && !extension._commandDialog, 'Actual approval cleanup did not finish');
+        assert(!await approvalStatus(), 'Closed preferences left revoked approval active');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
             GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,

@@ -21,7 +21,10 @@ imports.searchPath.unshift(directory.get_parent().get_path());
 const Preferences = imports[metadata.uuid].prefs.ScreenshotUtilsPreferencesModule.default;
 const preferences = new Preferences({metadata, dir: directory, path: directory.get_path()});
 const loop = new imports.gi.GLib.MainLoop(null, false);
-ScreenshotUtilsPreferencesChecks.checkPreferences(preferences).then(() => loop.quit(), error => {
+const check = ARGV[1] === 'approval'
+    ? ScreenshotUtilsPreferencesChecks.checkSessionApprovalPreferences
+    : ScreenshotUtilsPreferencesChecks.checkPreferences;
+check(preferences).then(() => loop.quit(), error => {
     logError(error);
     imports.system.exit(1);
 });
