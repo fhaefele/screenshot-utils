@@ -27,6 +27,23 @@ function clipboardText(window) {
         }));
 }
 
+async function waitUntil(condition, message) {
+    const deadline = GLib.get_monotonic_time() + 10_000_000;
+    while (!condition()) {
+        assert(GLib.get_monotonic_time() < deadline, message);
+        await new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
+            resolve();
+            return GLib.SOURCE_REMOVE;
+        }));
+    }
+}
+
+function folderChoosers() {
+    const windows = Gtk.Window.get_toplevels();
+    return Array.from({length: windows.get_n_items()}, (_, index) => windows.get_item(index))
+        .filter(window => window instanceof Gtk.FileChooserDialog && window.visible);
+}
+
 export async function checkPreferences(preferences) {
     const settings = preferences.getSettings();
     const previousFolder = settings.get_string('save-location');
@@ -157,6 +174,54 @@ export async function checkPreferences(preferences) {
         loop.run();
         assert(preview.label === unchangedPreview, 'Preview refreshed without a template edit');
         print('PASS: GTK folder validation, token note, event-driven filename preview and exact delays');
+
+        const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
+        assert(browse?.tooltip_text === 'Choose screenshot folder', 'Folder Browse button is missing');
+        const root = Gio.File.new_for_path(GLib.dir_make_tmp('screenshot-utils-folder-picker-XXXXXX'));
+        const chosen = root.get_child('Screenshots ü folder ');
+        chosen.make_directory(null);
+        const originalFileDialog = Gtk.FileDialog;
+        try {
+            window.present();
+            for (const FileDialog of originalFileDialog ? [originalFileDialog, undefined] : [undefined]) {
+                Gtk.FileDialog = FileDialog;
+                settings.set_string('save-location', root.get_path());
+                browse.emit('clicked');
+                browse.emit('clicked');
+                assert(!browse.sensitive, 'Browse allowed overlapping folder requests');
+                await waitUntil(() => folderChoosers().length === 1, 'Standard folder chooser did not open');
+                const chooser = folderChoosers()[0];
+                assert(chooser.get_transient_for() === window && chooser.modal &&
+                    chooser.get_action() === Gtk.FileChooserAction.SELECT_FOLDER,
+                'Folder chooser is not modal and attached to preferences');
+                await waitUntil(() => chooser.get_current_folder()?.equal(root), 'Chooser did not start at saved folder');
+                chooser.set_file(chosen);
+                await waitUntil(() => chooser.get_file()?.equal(chosen), 'Chooser did not select the requested folder');
+                chooser.response(Gtk.ResponseType.ACCEPT);
+                await waitUntil(() => browse.sensitive, 'Folder selection did not finish');
+                assert(settings.get_string('save-location') === chosen.get_path() && folder.text === chosen.get_path(),
+                    'Selected folder was not saved and displayed without URI escaping');
+
+                browse.emit('clicked');
+                await waitUntil(() => folderChoosers().length === 1, 'Cancel chooser did not open');
+                folderChoosers()[0].response(Gtk.ResponseType.CANCEL);
+                await waitUntil(() => browse.sensitive && folderChoosers().length === 0, 'Cancelled chooser did not close');
+                assert(settings.get_string('save-location') === chosen.get_path() && folder.text === chosen.get_path(),
+                    'Cancel changed the screenshot folder');
+                print(`PASS: ${FileDialog ? 'FileDialog' : 'FileChooserNative'} selection, trailing spaces, initial folder and cancellation`);
+            }
+            Gtk.FileDialog = originalFileDialog;
+            browse.emit('clicked');
+            await waitUntil(() => folderChoosers().length === 1, 'Close-request chooser did not open');
+            window.close();
+            await waitUntil(() => folderChoosers().length === 0, 'Closing preferences left a chooser open');
+            assert(settings.get_string('save-location') === chosen.get_path(), 'Closing preferences changed the screenshot folder');
+            print('PASS: folder picker closes with preferences');
+        } finally {
+            Gtk.FileDialog = originalFileDialog;
+            chosen.delete(null);
+            root.delete(null);
+        }
     } finally {
         settings.set_string('save-location', previousFolder);
         settings.set_string('filename-template', previousTemplate);
