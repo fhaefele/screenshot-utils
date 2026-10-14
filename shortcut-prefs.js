@@ -99,7 +99,12 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     const approve = new Gtk.Button({label: 'Approve for this session', halign: Gtk.Align.END});
     commands.append(approve);
     let updatingAsk = false;
+    let approvalProxy = null;
+    let requestingApproval = false;
     const requestApproval = async () => {
+        if (requestingApproval)
+            return;
+        requestingApproval = true;
         approve.sensitive = false;
         try {
             await callAsync(Gio.DBus.session, 'call', 'org.gnome.Shell', CAPTURE_BUS_PATH,
@@ -111,8 +116,9 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
                 window.add_toast(new Adw.Toast({title: 'Could not request approval. Make sure the extension is enabled and idle.'}));
             }
         } finally {
+            requestingApproval = false;
             if (!closed)
-                approve.sensitive = true;
+                syncAsk();
         }
     };
     approve.connect('clicked', requestApproval);
@@ -129,10 +135,24 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         updatingAsk = false;
         ask.sensitive = settings.get_boolean('enable-shortcut-commands');
         approve.visible = !askControl.active && ask.sensitive;
+        const approved = approvalProxy?.get_cached_property('SilentCommandsApproved')?.get_boolean() ?? false;
+        approve.label = approved ? 'Approved for this session' : 'Approve for this session';
+        approve.sensitive = !approved && !requestingApproval;
     };
     for (const key of ['ask-command-confirmation', 'enable-shortcut-commands'])
         handlers.push([settings, settings.connect(`changed::${key}`, syncAsk)]);
     syncAsk();
+    callAsync(Gio.DBusProxy, 'new_for_bus', Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+        null, 'org.gnome.Shell', CAPTURE_BUS_PATH, CAPTURE_BUS_INTERFACE, cancellable).then(proxy => {
+        if (closed)
+            return;
+        approvalProxy = proxy;
+        handlers.push([proxy, proxy.connect('g-properties-changed', syncAsk)]);
+        syncAsk();
+    }).catch(() => {
+        // Preferences can be opened while the extension is disabled. Approval
+        // requests report their own failure; the status remains unapproved.
+    });
 
     const shortcutContent = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     commands.append(shortcutContent);
@@ -227,6 +247,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     return () => {
         closed = true;
         cancellable.cancel();
+        approvalProxy = null;
         recorder?.close();
     };
 }

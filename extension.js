@@ -32,6 +32,7 @@ const CAPTURE_INTERFACE = `<node>
             <arg type="s" name="mode" direction="in"/>
         </method>
         <method name="ApproveSilentCommands"/>
+        <property name="SilentCommandsApproved" type="b" access="read"/>
     </interface>
 </node>`;
 
@@ -212,9 +213,11 @@ export default class ScreenshotUtilsExtension extends Extension {
             this._captureMode(mode).catch(error => this._notify(`Screenshot failed: ${error.message}`));
         });
         this._shortcuts.enable();
+        const extension = this;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
             ApproveSilentCommandsAsync: (_params, invocation) => this._requestCapture('screen', invocation, true),
+            get SilentCommandsApproved() { return extension._silentCommandsApproved(); },
         });
         this._dbus.export(Gio.DBus.session, CAPTURE_BUS_PATH);
     }
@@ -222,6 +225,7 @@ export default class ScreenshotUtilsExtension extends Extension {
     disable() {
         const run = this._run;
         this._run = null;
+        this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
         this._dbus?.unexport();
         this._dbus = null;
         this._shortcuts?.destroy();
@@ -273,6 +277,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         // restored the previous value before Shell dispatches the notification.
         run.commandEpoch++;
         run.silentCommandEpoch = null;
+        this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
         this._cancelCommandDialog();
         if (this._selector && this._selector.command !== null)
             this._cancelSelector();
@@ -290,6 +295,13 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Screenshot controls are unavailable');
         if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
             throw new Error('Saving screenshots is disabled by system policy');
+    }
+
+    _silentCommandsApproved() {
+        return !!this._run && this._run.silentCommandEpoch === this._run.commandEpoch &&
+            this._settings.get_string('shortcut-setup') === 'gnome' &&
+            this._settings.get_boolean('enable-shortcut-commands') &&
+            !this._settings.get_boolean('ask-command-confirmation');
     }
 
     _requestCapture(mode, invocation, approvalOnly = false) {
@@ -357,9 +369,10 @@ export default class ScreenshotUtilsExtension extends Extension {
                 await this._wait(0, run, null, null, null, command);
                 this._checkCaptureAllowed(run, command);
                 allowed &&= !dialog.cancelled;
-                if (session && allowed)
+                if (session && allowed) {
                     run.silentCommandEpoch = command;
-                else if (session)
+                    this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', true));
+                } else if (session)
                     this._settings.set_boolean('ask-command-confirmation', true);
             }
         } finally {

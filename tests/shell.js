@@ -118,6 +118,19 @@ function requestCommand(method, parameters = null) {
         }));
 }
 
+function approvalStatus() {
+    return new Promise((resolve, reject) => Gio.DBus.session.call(
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'org.freedesktop.DBus.Properties', 'Get',
+        new GLib.Variant('(ss)', ['dev.fxth.ScreenshotUtils', 'SilentCommandsApproved']),
+        null, Gio.DBusCallFlags.NONE, 5000, null, (connection, result) => {
+            try {
+                resolve(connection.call_finish(result).get_child_value(0).get_variant().get_boolean());
+            } catch (error) {
+                reject(error);
+            }
+        }));
+}
+
 export async function run() {
     await waitUntil(() => Main.panel.statusArea[UUID], () => {
         const extension = Main.extensionManager.lookup(UUID);
@@ -636,6 +649,7 @@ export async function run() {
         await waitUntil(() => !extension._busy, 'Session approval did not finish');
         assert(extension._run.silentCommandEpoch === extension._run.commandEpoch &&
             !directory.get_child('Silent-screen.png').query_exists(null), 'Approval itself captured a screenshot');
+        assert(await approvalStatus(), 'Preferences approval status did not report granted consent');
         await requestCapture('screen');
         await waitUntil(() => !extension._busy, 'Approved silent command did not finish');
         assert(!extension._commandDialog, 'Approved silent command prompted again');
@@ -652,6 +666,7 @@ export async function run() {
         await waitUntil(() => !extension._busy, 'Silent revocation did not cancel the delay');
         assert(extension._run.silentCommandEpoch === null &&
             !directory.get_child('Silent-revoked-screen.png').query_exists(null), 'Revoked silent capture continued');
+        assert(!await approvalStatus(), 'Preferences approval status survived revocation');
         settings.set_int('capture-delay-ms', 0);
         await requestCommand('ApproveSilentCommands');
         await allowCommand();
@@ -659,6 +674,7 @@ export async function run() {
         extension.disable();
         extension.enable();
         assert(extension._run.silentCommandEpoch === null, 'Session approval survived disable/re-enable');
+        assert(!await approvalStatus(), 'Preferences approval status survived disable/re-enable');
         await requestCapture('screen');
         await waitUntil(() => extension._commandDialog?.visible, 'Restarted extension reused silent approval');
         assert(extension._commandDialog.session, 'Restarted extension did not request session approval');
