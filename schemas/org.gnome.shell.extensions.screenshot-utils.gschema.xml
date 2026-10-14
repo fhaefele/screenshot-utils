@@ -41,7 +41,13 @@
     <key name="ask-command-confirmation" type="b">
       <default>true</default>
       <summary>Ask before screenshots from commands</summary>
-      <description>When false, an explicit Shell approval allows all local applications to request screenshots. Approval persists across logins; turning access off, changing permissions/source, disabling or uninstalling the extension revokes it.</description>
+      <description>When false, an explicit Shell approval allows all local applications to request screenshots. Approval lasts for the selected duration. Session approval must be renewed on the first command after logout or Shell restart. Turning access off, changing permissions/source, disabling or uninstalling the extension revokes approval.</description>
+    </key>
+    <key name="command-approval-duration" type="s">
+      <default>'persistent'</default>
+      <choices><choice value="session"/><choice value="persistent"/></choices>
+      <summary>Screenshot command approval duration</summary>
+      <description>Remember Ask or Skip for this session or always. Session choices are confirmed again on first use after logout or Shell restart. Skipping confirmation always requires explicit Shell approval; persistent grants last until revoked.</description>
     </key>
     <key name="silent-command-approved" type="b">
       <default>false</default>

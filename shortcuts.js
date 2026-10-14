@@ -8,6 +8,15 @@ export const CAPTURE_SHORTCUTS = Object.freeze([
 export const CAPTURE_BUS_PATH = '/org/gnome/shell/extensions/screenshotutils';
 export const CAPTURE_BUS_INTERFACE = 'dev.fxth.ScreenshotUtils';
 
+export function resetCommandPreferences(settings) {
+    if (!settings.get_boolean('ask-command-confirmation'))
+        settings.set_boolean('ask-command-confirmation', true);
+    if (settings.get_string('command-approval-duration') !== 'persistent')
+        settings.set_string('command-approval-duration', 'persistent');
+    if (settings.get_boolean('silent-command-approved'))
+        settings.set_boolean('silent-command-approved', false);
+}
+
 export function usableShortcut(accelerator) {
     // Reject plain typing keys even when preferences are written externally.
     // Mutter still parses the complete accelerator and checks its reservation.

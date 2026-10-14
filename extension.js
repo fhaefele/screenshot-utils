@@ -23,7 +23,7 @@ import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 import {createCaptureIcon} from './capture-icons.js';
 import {ShortcutManager} from './shortcut-manager.js';
 import {ShortcutPermission} from './shortcut-permission.js';
-import {CAPTURE_BUS_PATH} from './shortcuts.js';
+import {CAPTURE_BUS_PATH, resetCommandPreferences} from './shortcuts.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
@@ -32,8 +32,9 @@ const CAPTURE_INTERFACE = `<node>
         <method name="Capture">
             <arg type="s" name="mode" direction="in"/>
         </method>
-        <method name="ApproveSilentCommands"/>
+        <method name="ConfigureCommandConfirmation"><arg type="b" name="ask" direction="in"/></method>
         <property name="Available" type="b" access="read"/>
+        <property name="CommandConfigurationAvailable" type="b" access="read"/>
         <property name="SilentCommandsApproved" type="b" access="read"/>
     </interface>
 </node>`;
@@ -199,14 +200,23 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
         this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
-        this._permission = new ShortcutPermission(this._settings, this.dir);
+        // Plain session state survives automatic lock/unlock disable/enable.
+        // A new Shell process starts without it; explicit disable revokes it.
+        this._commandSession ??= {approved: false, policyConfirmed: false};
+        if (this._settings.get_string('shortcut-setup') === 'extension')
+            resetCommandPreferences(this._settings);
+        this._permission = new ShortcutPermission(this._settings, this.dir, this._commandSession);
         if (!this._settings.get_boolean('shortcuts-enabled') ||
             this._settings.get_string('shortcut-setup') !== 'gnome' ||
-            this._settings.get_boolean('ask-command-confirmation'))
+            (this._settings.get_boolean('ask-command-confirmation') && this._permission.approved))
             this._permission.revoke();
         this._commandDialog = null;
-        this._commandSettingIds = ['shortcuts-enabled', 'ask-command-confirmation', 'shortcut-setup']
-            .map(key => this._settings.connect(`changed::${key}`, () => this._revokeCommandPermission()));
+        this._commandSettingIds = ['shortcuts-enabled', 'ask-command-confirmation', 'shortcut-setup', 'command-approval-duration']
+            .map(key => this._settings.connect(`changed::${key}`, () => {
+                if (key === 'shortcut-setup' && this._settings.get_string(key) === 'extension')
+                    resetCommandPreferences(this._settings);
+                this._revokeCommandPermission();
+            }));
         this._commandSettingIds.push(this._settings.connect('changed::silent-command-approved', () => {
             if (!this._settings.get_boolean('silent-command-approved'))
                 this._invalidateCommandRequests();
@@ -228,12 +238,14 @@ export default class ScreenshotUtilsExtension extends Extension {
         const extension = this;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
-            ApproveSilentCommandsAsync: (_params, invocation) => this._requestCapture('screen', invocation, true),
+            ConfigureCommandConfirmationAsync: ([ask], invocation) => this._requestCapture('screen', invocation, true, ask),
             get Available() { return !!extension._run; },
+            get CommandConfigurationAvailable() { return extension._commandConfigurationAvailable(); },
             get SilentCommandsApproved() { return extension._silentCommandsApproved(); },
         });
         this._dbus.export(Gio.DBus.session, CAPTURE_BUS_PATH);
         this._dbus.emit_property_changed('Available', new GLib.Variant('b', true));
+        this._dbus.emit_property_changed('CommandConfigurationAvailable', new GLib.Variant('b', this._commandConfigurationAvailable()));
         this._dbus.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', this._silentCommandsApproved()));
     }
 
@@ -248,6 +260,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._run = null;
         this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
         this._dbus?.emit_property_changed('Available', new GLib.Variant('b', false));
+        this._dbus?.emit_property_changed('CommandConfigurationAvailable', new GLib.Variant('b', false));
         // Property changes are queued; deliver stopped state before unexport
         // so open preferences can track lock/unlock and runtime restarts.
         this._dbus?.flush();
@@ -302,9 +315,15 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Screenshot command permission was revoked');
     }
 
+    _commandConfigurationAvailable() {
+        return !!this._run && this._settings.get_boolean('shortcuts-enabled') &&
+            this._settings.get_string('shortcut-setup') === 'gnome';
+    }
+
     _revokeCommandPermission() {
         this._permission?.revoke();
         this._invalidateCommandRequests();
+        this._dbus?.emit_property_changed('CommandConfigurationAvailable', new GLib.Variant('b', this._commandConfigurationAvailable()));
         this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
     }
 
@@ -343,16 +362,11 @@ export default class ScreenshotUtilsExtension extends Extension {
             !this._settings.get_boolean('ask-command-confirmation');
     }
 
-    _requestCapture(mode, invocation, approvalOnly = false) {
+    _requestCapture(mode, invocation, approvalOnly = false, ask = null) {
         if (!this._settings?.get_boolean('shortcuts-enabled') ||
             this._settings.get_string('shortcut-setup') !== 'gnome') {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
                 'Use GNOME Keyboard Settings mode and enable keyboard shortcuts in preferences first');
-            return;
-        }
-        if (approvalOnly && this._settings.get_boolean('ask-command-confirmation')) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Choose Allow without asking to request approval');
             return;
         }
         if (!['selection', 'screen', 'window'].includes(mode)) {
@@ -362,12 +376,35 @@ export default class ScreenshotUtilsExtension extends Extension {
         if (this._requestBlocked(invocation))
             return;
         const run = this._run;
-        this._runCommand(mode, run, run.commandEpoch, approvalOnly).catch(error => {
-            if (this._run === run)
-                this._notify(`Screenshot failed: ${error.message}`);
+        if (approvalOnly) {
+            // Apply preferences and revoke the old grant in Shell before opening
+            // the dialog; GTK must not race a settings-file notification here.
+            if (ask !== this._settings.get_boolean('ask-command-confirmation'))
+                this._settings.set_boolean('ask-command-confirmation', ask);
+            else
+                this._revokeCommandPermission();
+        }
+        let replied = false;
+        const reply = error => {
+            if (replied)
+                return;
+            replied = true;
+            if (error)
+                invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', error.message);
+            else
+                invocation.return_value(null);
+        };
+        this._runCommand(mode, run, run.commandEpoch, approvalOnly, approvalOnly ? () => reply() : null).catch(error => {
+            if (approvalOnly && !replied)
+                reply(error);
+            else if (this._run === run)
+                this._notify(approvalOnly ? `Could not configure screenshot commands: ${error.message}`
+                    : `Screenshot failed: ${error.message}`);
         });
-        // Reply immediately; only Shell's own dialog can grant command consent.
-        invocation.return_value(null);
+        // Capture replies immediately. Configuration replies once the dialog
+        // has grabbed input, so preferences cannot toggle again while it opens.
+        if (!approvalOnly)
+            reply();
     }
 
     _requestBlocked(invocation) {
@@ -388,15 +425,16 @@ export default class ScreenshotUtilsExtension extends Extension {
         return false;
     }
 
-    async _runCommand(mode, run, command, approvalOnly = false) {
+    async _runCommand(mode, run, command, approvalOnly = false, onOpened = null) {
         this._busy = true;
         let allowed;
+        let confirmRequest = false;
         let dialog = null;
         try {
             await this._prepareCapture(run, command);
             this._checkCaptureAllowed(run, command);
-            const persistent = !this._settings.get_boolean('ask-command-confirmation');
-            if (persistent && this._silentCommandsApproved()) {
+            const approval = approvalOnly || !this._settings.get_boolean('ask-command-confirmation') || !this._permission.policyConfirmed;
+            if (approval && !approvalOnly && this._silentCommandsApproved()) {
                 allowed = true;
             } else {
                 dialog = new CommandConfirmation();
@@ -406,19 +444,42 @@ export default class ScreenshotUtilsExtension extends Extension {
                     dialog.populate(mode, choice => {
                         dialog.cancelled ||= !choice;
                         resolve(choice);
-                    }, persistent);
+                    }, approval, this._settings.get_string('command-approval-duration'));
                 });
                 if (!dialog.open())
                     throw new Error('Could not grab screenshot confirmation input');
+                onOpened?.();
                 allowed = await choice;
                 await this._wait(0, run, null, null, null, command);
                 this._checkCaptureAllowed(run, command);
                 allowed &&= !dialog.cancelled;
-                if (persistent && allowed) {
-                    this._permission.grant();
-                    this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', true));
-                } else if (persistent)
+                if (approval && (allowed || dialog.askSelected)) {
+                    const duration = dialog.duration;
+                    if (duration !== this._settings.get_string('command-approval-duration')) {
+                        // Changing duration revokes the old epoch before this
+                        // explicit Shell choice grants permission under the new one.
+                        this._settings.set_string('command-approval-duration', duration);
+                        command = run.commandEpoch;
+                        this._checkCaptureAllowed(run, command);
+                    }
+                    if (allowed) {
+                        if (this._settings.get_boolean('ask-command-confirmation')) {
+                            this._settings.set_boolean('ask-command-confirmation', false);
+                            command = run.commandEpoch;
+                            this._checkCaptureAllowed(run, command);
+                        }
+                        this._permission.grant();
+                        this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', true));
+                    } else {
+                        confirmRequest = !approvalOnly;
+                        if (!this._settings.get_boolean('ask-command-confirmation'))
+                            this._settings.set_boolean('ask-command-confirmation', true);
+                        command = run.commandEpoch;
+                        this._permission.confirmPolicy();
+                    }
+                } else if (approval && !this._settings.get_boolean('ask-command-confirmation')) {
                     this._settings.set_boolean('ask-command-confirmation', true);
+                }
             }
         } finally {
             if (this._commandDialog === dialog)
@@ -426,6 +487,8 @@ export default class ScreenshotUtilsExtension extends Extension {
             if (this._run === run)
                 this._busy = false;
         }
+        if (confirmRequest)
+            return this._runCommand(mode, run, command);
         if (!allowed || approvalOnly)
             return;
         await this._captureMode(mode, command);
