@@ -308,8 +308,11 @@ export async function checkPreferences(preferences) {
                     chooser.get_action() === Gtk.FileChooserAction.SELECT_FOLDER,
                 'Folder chooser is not modal and attached to preferences');
                 await waitUntil(() => chooser.get_current_folder()?.equal(root), 'Chooser did not start at saved folder');
-                chooser.set_file(chosen);
-                await waitUntil(() => chooser.get_file()?.equal(chosen), 'Chooser did not select the requested folder');
+                // Navigate into the folder: set_file() can race the initial
+                // directory model load and lose its pending row selection.
+                chooser.set_current_folder(chosen);
+                await waitUntil(() => chooser.get_current_folder()?.equal(chosen) && chooser.get_file()?.equal(chosen),
+                    'Chooser did not select the requested folder');
                 chooser.response(Gtk.ResponseType.ACCEPT);
                 await waitUntil(() => browse.sensitive, 'Folder selection did not finish');
                 assert(settings.get_string('save-location') === chosen.get_path() && folder.text === chosen.get_path(),
