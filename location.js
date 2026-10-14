@@ -19,7 +19,8 @@ export async function ensureDirectory(directory, cancellable) {
 
 export function ensureSaveLocation(settings) {
     const stored = settings.get_string('save-location');
-    let location = stored.trim();
+    // Absolute paths from a chooser can contain meaningful trailing spaces.
+    let location = GLib.path_is_absolute(stored) ? stored : stored.trim();
     if (!location || settings.get_user_value('save-location') === null)
         location = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || GLib.get_home_dir();
     if (location !== stored)

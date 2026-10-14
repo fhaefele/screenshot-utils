@@ -178,7 +178,7 @@ export async function checkPreferences(preferences) {
         const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
         assert(browse?.tooltip_text === 'Choose screenshot folder', 'Folder Browse button is missing');
         const root = Gio.File.new_for_path(GLib.dir_make_tmp('screenshot-utils-folder-picker-XXXXXX'));
-        const chosen = root.get_child('Screenshots ü folder');
+        const chosen = root.get_child('Screenshots ü folder ');
         chosen.make_directory(null);
         const originalFileDialog = Gtk.FileDialog;
         try {
@@ -208,7 +208,7 @@ export async function checkPreferences(preferences) {
                 await waitUntil(() => browse.sensitive && folderChoosers().length === 0, 'Cancelled chooser did not close');
                 assert(settings.get_string('save-location') === chosen.get_path() && folder.text === chosen.get_path(),
                     'Cancel changed the screenshot folder');
-                print(`PASS: ${FileDialog ? 'FileDialog' : 'FileChooserNative'} selection, spaces, initial folder and cancellation`);
+                print(`PASS: ${FileDialog ? 'FileDialog' : 'FileChooserNative'} selection, trailing spaces, initial folder and cancellation`);
             }
             Gtk.FileDialog = originalFileDialog;
             browse.emit('clicked');

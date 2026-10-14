@@ -34,8 +34,8 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const folder = createEntryRow({title: 'Screenshot folder',
             text: ensureSaveLocation(settings), show_apply_button: true});
         const applyFolder = () => {
-            const value = folder.get_text().trim();
-            if (value)
+            const value = folder.get_text();
+            if (value.trim())
                 settings.set_string('save-location', value);
             folder.set_text(ensureSaveLocation(settings));
         };
