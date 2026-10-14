@@ -231,11 +231,11 @@ export async function checkPreferences(preferences) {
             bus.call_finish = () => new GLib.Variant('()', []);
             commandSwitch.active = true;
             permission.selected = 1;
-            await waitUntil(() => approve.sensitive, 'Approval request did not finish');
+            await waitUntil(() => approvals >= 1 && approve.sensitive, 'Approval request did not finish');
             assert(!settings.get_boolean('ask-command-confirmation') && approvals === 1 && approve.visible,
-                'Silent preference did not request Shell approval');
+                `Silent permission request mismatch: requests=${approvals}, asking=${settings.get_boolean('ask-command-confirmation')}, visible=${approve.visible}`);
             approve.emit('clicked');
-            await waitUntil(() => approve.sensitive, 'Session reapproval did not finish');
+            await waitUntil(() => approvals >= 2 && approve.sensitive, 'Command reapproval did not finish');
             assert(approvals === 2, 'Session reapproval button did not request approval');
             settings.set_boolean('ask-command-confirmation', true);
             assert(permission.selected === 0 && !approve.visible, 'Confirmation preference did not sync');

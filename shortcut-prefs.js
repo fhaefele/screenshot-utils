@@ -131,13 +131,15 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     };
     approve.connect('clicked', requestApproval);
     setup.connect('notify::selected', () => {
-        if (!updating)
+        if (!updating && settings.get_string('shortcut-setup') !== (sources[setup.selected] ?? ''))
             settings.set_string('shortcut-setup', sources[setup.selected] ?? '');
     });
     permission.connect('notify::selected', () => {
         if (updating)
             return;
         const ask = permission.selected === 0;
+        if (ask === settings.get_boolean('ask-command-confirmation'))
+            return;
         settings.set_boolean('ask-command-confirmation', ask);
         if (!ask && settings.get_boolean('shortcuts-enabled') && settings.get_string('shortcut-setup') === 'gnome')
             requestApproval();
