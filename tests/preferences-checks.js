@@ -48,24 +48,32 @@ function folderChoosers() {
 // Use the real bus and Shell dialog here, separately from the widget checks.
 export async function checkSessionApprovalPreferences(preferences) {
     const settings = preferences.getSettings();
+    const previousDelay = settings.get_int('capture-delay-ms');
     const window = new Adw.PreferencesWindow();
     try {
         preferences.fillPreferencesWindow(window);
         window.present();
         const widgets = descendants(window);
-        const ask = widgets.find(widget => widget instanceof Adw.ActionRow &&
-            widget.title === 'Ask before screenshots from commands');
-        const control = Adw.SwitchRow ? ask : descendants(ask).find(widget => widget instanceof Gtk.Switch);
-        const approve = widgets.find(widget => widget instanceof Gtk.Button && widget.label === 'Approve for this session');
-        control.active = false;
-        await waitUntil(() => approve.label === 'Approved for this session', 'Actual preference toggle did not receive session approval');
-        assert(!approve.sensitive, 'Approved session still offers redundant approval');
+        const permission = widgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Command permission');
+        const approve = widgets.find(widget => widget instanceof Gtk.Button && widget.label === 'Approve command access');
+        permission.selected = 1;
+        await waitUntil(() => approve.label === 'Command access approved', 'Actual permission choice did not receive Shell approval');
+        assert(!approve.sensitive, 'Approved permission still offers redundant approval');
+        // Coordinate a runtime stop/start with the Shell integration process.
+        settings.set_int('capture-delay-ms', 124);
+        await waitUntil(() => approve.label === 'Approve command access' &&
+            widgets.some(widget => widget instanceof Gtk.Label && widget.label === 'Extension disabled'),
+        'Open preferences did not report the stopped extension');
+        settings.set_int('capture-delay-ms', 125);
+        await waitUntil(() => approve.label === 'Command access approved',
+            'Open preferences did not restore persisted approval after runtime restart');
         settings.set_boolean('ask-command-confirmation', true);
-        await waitUntil(() => control.active && !approve.visible && approve.label === 'Approve for this session',
+        await waitUntil(() => permission.selected === 0 && !approve.visible && approve.label === 'Approve command access',
             'Actual approval revocation did not update preferences');
-        print('PASS: actual preferences toggle, Shell dialog and live approval/revocation feedback');
+        print('PASS: actual preferences permission, Shell dialog and live approval across runtime restart/revocation');
     } finally {
         window.close();
+        settings.set_int('capture-delay-ms', previousDelay);
         settings.set_boolean('ask-command-confirmation', true);
     }
 }
@@ -75,19 +83,20 @@ export async function checkPreferences(preferences) {
     const previousFolder = settings.get_string('save-location');
     const previousTemplate = settings.get_string('filename-template');
     const previousDelay = settings.get_int('capture-delay-ms');
-    const previousCommands = settings.get_boolean('enable-shortcut-commands');
+    const previousCommands = settings.get_boolean('shortcuts-enabled');
     const previousSetup = settings.get_string('shortcut-setup');
     const previousAsk = settings.get_boolean('ask-command-confirmation');
     const previousBindings = ['shortcut-selection', 'shortcut-screen', 'shortcut-window']
         .map(key => [key, settings.get_string(key)]);
-    settings.set_string('shortcut-setup', 'gnome');
+    settings.set_string('shortcut-setup', '');
+    settings.set_boolean('shortcuts-enabled', false);
     settings.set_boolean('ask-command-confirmation', true);
     const window = new Adw.PreferencesWindow();
 
     try {
         preferences.fillPreferencesWindow(window);
         const widgets = descendants(window);
-        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,
+        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 5,
             'Preferences contain an obsolete capture switch');
         const folder = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Screenshot folder');
         const template = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Filename template');
@@ -131,14 +140,17 @@ export async function checkPreferences(preferences) {
             widget.title === 'Keyboard Shortcuts');
         assert(shortcuts, 'Keyboard shortcut instructions are missing');
         const shortcutWidgets = descendants(shortcuts);
-        const allowCommands = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
-            widget.title === 'Allow shortcut commands');
-        assert(allowCommands && allowCommands.subtitle.includes('local applications'),
-            'Shortcut permission has no disclosure');
-        const commandSwitch = Adw.SwitchRow ? allowCommands : descendants(allowCommands).find(widget => widget instanceof Gtk.Switch);
-        commandSwitch.active = !previousCommands;
-        assert(settings.get_boolean('enable-shortcut-commands') === !previousCommands, 'Shortcut permission was not saved');
-        commandSwitch.active = previousCommands;
+        const enableShortcuts = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
+            widget.title === 'Enable screenshot shortcuts');
+        const commandSwitch = Adw.SwitchRow ? enableShortcuts : descendants(enableShortcuts).find(widget => widget instanceof Gtk.Switch);
+        const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Shortcut source');
+        assert(!commandSwitch.active && !setup.visible && setup.selected === 0,
+            'Disabled shortcuts showed or preselected a source');
+        commandSwitch.active = true;
+        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === 0,
+            'Master switch did not reveal explicit source selection');
+        setup.selected = 1;
+        assert(settings.get_string('shortcut-setup') === 'gnome', 'GNOME source choice was not saved');
         const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
             widget.label.startsWith('Keyboard Settings →'));
         assert(instructions && !instructions.has_css_class('caption') && !instructions.has_css_class('dim-label'),
@@ -201,12 +213,10 @@ export async function checkPreferences(preferences) {
         }
         print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard Settings launch');
 
-        const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Shortcut setup');
-        assert(setup?.selected === 0, 'GNOME setup is not the default');
-        const ask = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
-            widget.title === 'Ask before screenshots from commands');
-        const askControl = Adw.SwitchRow ? ask : descendants(ask).find(widget => widget instanceof Gtk.Switch);
-        const approve = shortcutWidgets.find(widget => widget instanceof Gtk.Button && widget.label === 'Approve for this session');
+        const permission = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Command permission');
+        const approve = shortcutWidgets.find(widget => widget instanceof Gtk.Button && widget.label === 'Approve command access');
+        assert(shortcutWidgets.some(widget => widget instanceof Gtk.Label && widget.label.includes('Any local application') &&
+            widget.label.includes('persists across logins')), 'Persistent command access has no scope disclosure');
         const bus = Gio.DBus.session;
         const originalCall = bus.call;
         const originalFinish = bus.call_finish;
@@ -220,7 +230,7 @@ export async function checkPreferences(preferences) {
             };
             bus.call_finish = () => new GLib.Variant('()', []);
             commandSwitch.active = true;
-            askControl.active = false;
+            permission.selected = 1;
             await waitUntil(() => approve.sensitive, 'Approval request did not finish');
             assert(!settings.get_boolean('ask-command-confirmation') && approvals === 1 && approve.visible,
                 'Silent preference did not request Shell approval');
@@ -228,12 +238,12 @@ export async function checkPreferences(preferences) {
             await waitUntil(() => approve.sensitive, 'Session reapproval did not finish');
             assert(approvals === 2, 'Session reapproval button did not request approval');
             settings.set_boolean('ask-command-confirmation', true);
-            assert(askControl.active && !approve.visible, 'Confirmation preference did not sync');
+            assert(permission.selected === 0 && !approve.visible, 'Confirmation preference did not sync');
         } finally {
             bus.call = originalCall;
             bus.call_finish = originalFinish;
         }
-        setup.selected = 1;
+        setup.selected = 2;
         assert(settings.get_string('shortcut-setup') === 'extension' && !instructions.get_parent().get_parent().visible,
             'Extension setup did not hide command instructions');
         const selectionShortcut = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow && widget.title === 'Selection shortcut');
@@ -250,24 +260,8 @@ export async function checkPreferences(preferences) {
         keyController.emit('key-pressed', Gdk.KEY_F11, 95, Gdk.ModifierType.CONTROL_MASK);
         keyController.emit('key-pressed', Gdk.KEY_Return, 36, 0);
         assert(settings.get_string('shortcut-selection') === '<Control>F11', 'Recorder did not save captured keys');
-        const activate = shortcutWidgets.find(widget => widget instanceof Gtk.Button &&
-            widget.label === 'Activate shortcuts for this session');
-        assert(activate?.sensitive, 'Assigned native shortcut has no activation control');
-        try {
-            let requested = false;
-            bus.call = (_destination, _path, _iface, method, _params, _type, _flags, _timeout, _cancellable, callback) => {
-                assert(method === 'ApproveNativeShortcuts', 'Native activation requested command access');
-                requested = true;
-                callback(bus, null);
-            };
-            bus.call_finish = () => new GLib.Variant('()', []);
-            activate.emit('clicked');
-            await waitUntil(() => activate.sensitive, 'Native activation request did not finish');
-            assert(requested, 'Native activation control did not contact Shell');
-        } finally {
-            bus.call = originalCall;
-            bus.call_finish = originalFinish;
-        }
+        assert(!shortcutWidgets.some(widget => widget instanceof Gtk.Button && widget.label?.includes('Activate shortcuts')) &&
+            !permission.get_parent().get_parent().visible, 'Native mode exposed command permission or approval controls');
         clearShortcut.emit('clicked');
         assert(settings.get_string('shortcut-selection') === '' && !clearShortcut.sensitive, 'Clear did not remove the shortcut');
         setShortcut.emit('clicked');
@@ -280,10 +274,10 @@ export async function checkPreferences(preferences) {
         descendants(cancelledRecorder).find(widget => widget instanceof Gtk.Button && widget.label === 'Cancel').grab_focus();
         cancelledKeys.emit('key-pressed', Gdk.KEY_Return, 36, 0);
         assert(settings.get_string('shortcut-selection') === '', 'Keyboard Cancel saved a shortcut');
-        setup.selected = 0;
+        setup.selected = 1;
         assert(instructions.get_parent().get_parent().visible, 'GNOME setup did not restore command instructions');
-        settings.set_boolean('enable-shortcut-commands', previousCommands);
-        print('PASS: GTK setup modes, Shell approval request, key recording and clearing');
+        settings.set_boolean('shortcuts-enabled', previousCommands);
+        print('PASS: GTK master switch, source choice, persistent command approval and direct native key setup');
 
         const unchangedPreview = preview.label;
         const loop = new GLib.MainLoop(null, false);
@@ -345,7 +339,7 @@ export async function checkPreferences(preferences) {
         settings.set_string('save-location', previousFolder);
         settings.set_string('filename-template', previousTemplate);
         settings.set_int('capture-delay-ms', previousDelay);
-        settings.set_boolean('enable-shortcut-commands', previousCommands);
+        settings.set_boolean('shortcuts-enabled', previousCommands);
         settings.set_boolean('ask-command-confirmation', previousAsk);
         settings.set_string('shortcut-setup', previousSetup);
         for (const [key, value] of previousBindings)

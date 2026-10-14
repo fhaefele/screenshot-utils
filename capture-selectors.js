@@ -9,7 +9,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import {SelectArea} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {connectSecondaryClick} from './shell-compat.js';
-import {displayShortcut} from './shortcuts.js';
 
 /*! SelectArea lifecycle adapted from GNOME Shell, GNOME Shell contributors,
  * licensed GPL-2.0-or-later. Native geometry and input handling remain inherited. */
@@ -67,21 +66,18 @@ class CaptureDialog extends ModalDialog.ModalDialog {
 
 export const CommandConfirmation = GObject.registerClass(
 class CommandConfirmation extends CaptureDialog {
-    populate(mode, onChoice, session = false, nativeShortcuts = null) {
-        this.session = session;
-        this.native = nativeShortcuts !== null;
+    populate(mode, onChoice, persistent = false) {
+        this.persistent = persistent;
         const subject = {screen: 'your entire screen', selection: 'a selected area', window: 'a selected window'}[mode];
-        this.contentLayout.add_child(new St.Label({text: this.native ? 'Activate screenshot shortcuts?' : session
+        this.contentLayout.add_child(new St.Label({text: persistent
             ? 'Allow screenshots without asking?' : 'Allow screenshot command?', style_class: 'headline'}));
-        const description = new St.Label({text: this.native
-            ? `${nativeShortcuts.map(shortcut => `${shortcut.title}: ${displayShortcut(shortcut.accelerator)}`).join('\n')}\n\nThese global keys will take screenshots immediately.\nApproval resets when assignments change, this extension is disabled or GNOME Shell restarts.`
-            : session
-            ? 'Any local program can request screenshots without asking.\nAccess lasts until permission changes, this extension is disabled or GNOME Shell restarts.'
+        const description = new St.Label({text: persistent
+            ? 'Any local application can request screenshots without confirmation.\nPermission persists across logins until you turn it off or disable the extension.\nUnrestricted local programs can modify saved permissions.'
             : `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
         description.clutter_text.line_wrap = true;
         this.contentLayout.add_child(description);
-        this._cancelButton = this.addButton({label: session ? 'Keep asking' : 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
-        this._allowButton = this.addButton({label: this.native ? 'Activate for this session' : session ? 'Allow for this session' : 'Allow', action: () => onChoice(true)});
+        this._cancelButton = this.addButton({label: persistent ? 'Keep asking' : 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
+        this._allowButton = this.addButton({label: persistent ? 'Allow commands' : 'Allow', action: () => onChoice(true)});
         this.setInitialKeyFocus(this._cancelButton);
     }
 });

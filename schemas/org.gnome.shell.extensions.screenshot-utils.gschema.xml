@@ -28,20 +28,25 @@
       <default>false</default>
       <summary>Copy the screenshot image to the clipboard</summary>
     </key>
-    <key name="enable-shortcut-commands" type="b">
+    <key name="shortcuts-enabled" type="b">
       <default>false</default>
-      <summary>Allow shortcut commands</summary>
-      <description>Allow local session-bus clients to request screenshots in GNOME Keyboard Settings mode. Disabling cancels pending command captures and clears session approval.</description>
+      <summary>Enable screenshot shortcuts</summary>
+      <description>Enable the chosen shortcut source. Turning off cancels shortcut captures and revokes command approval.</description>
     </key>
     <key name="shortcut-setup" type="s">
-      <default>'gnome'</default>
-      <choices><choice value="gnome"/><choice value="extension"/></choices>
+      <default>''</default>
+      <choices><choice value=""/><choice value="gnome"/><choice value="extension"/></choices>
       <summary>Shortcut setup</summary>
     </key>
     <key name="ask-command-confirmation" type="b">
       <default>true</default>
       <summary>Ask before screenshots from commands</summary>
-      <description>When false, GNOME Shell still requires one explicit approval before allowing silent commands. Approval is cleared on permission changes, extension disable or Shell restart.</description>
+      <description>When false, an explicit Shell approval allows all local applications to request screenshots. Approval persists across logins; turning access off, changing permissions/source, disabling or uninstalling the extension revokes it.</description>
+    </key>
+    <key name="silent-command-approved" type="b">
+      <default>false</default>
+      <summary>Persistent screenshot command permission</summary>
+      <description>Used with this installation's approval record. Unrestricted local programs can modify saved permissions.</description>
     </key>
     <key name="shortcut-selection" type="s">
       <default>''</default>

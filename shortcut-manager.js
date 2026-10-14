@@ -9,62 +9,41 @@ import {CAPTURE_SHORTCUTS, usableShortcut} from './shortcuts.js';
 // addKeybinding(), they do not automatically overwrite another binding when
 // the underlying preference changes.
 export class ShortcutManager {
-    constructor(settings, capture, approvalChanged) {
+    constructor(settings, capture, changed) {
         this._settings = settings;
         this._capture = capture;
-        this._approvalChanged = approvalChanged;
+        this._changed = changed;
         this.bindings = new Map();
         this._handlers = [];
         this._syncing = false;
         this.epoch = 0;
-        this._approvedSnapshot = null;
     }
 
     enable() {
         this._handlers.push([global.display, global.display.connect('accelerator-activated', (_display, action) => {
             for (const [mode, binding] of this.bindings) {
                 if (binding.action === action) {
-                    if (this.approved && !Main.sessionMode.isLocked && !Main.sessionMode.isGreeter &&
+                    if (this.active && !Main.sessionMode.isLocked && !Main.sessionMode.isGreeter &&
                         Main.modalCount === 0 && this._settings.get_string('shortcut-setup') === 'extension')
                         this._capture(mode);
                     return;
                 }
             }
         })]);
-        for (const key of ['shortcut-setup', ...CAPTURE_SHORTCUTS.map(shortcut => shortcut.key)])
+        for (const key of ['shortcuts-enabled', 'shortcut-setup', ...CAPTURE_SHORTCUTS.map(shortcut => shortcut.key)])
             this._handlers.push([this._settings, this._settings.connect(`changed::${key}`, () => {
                 if (this._syncing)
                     return;
                 this.epoch++;
-                this._approvedSnapshot = null;
-                this._sync(key);
-                this._approvalChanged(false, true);
+                        this._sync(key);
+                this._changed();
             })]);
         this._sync();
     }
 
-    _snapshot() {
-        return JSON.stringify([this._settings.get_string('shortcut-setup'),
-            ...CAPTURE_SHORTCUTS.map(({key}) => this._settings.get_string(key))]);
-    }
-
-    get approved() {
-        return this._approvedSnapshot !== null && this._approvedSnapshot === this._snapshot();
-    }
-
-    approvalRequest() {
-        return {epoch: this.epoch, snapshot: this._snapshot(), shortcuts: CAPTURE_SHORTCUTS
-            .filter(({mode}) => this.bindings.has(mode))
-            .map(({mode, title}) => ({title, accelerator: this.bindings.get(mode).accelerator}))};
-    }
-
-    approve(request) {
-        if (request.epoch !== this.epoch || request.snapshot !== this._snapshot() ||
-            this._settings.get_string('shortcut-setup') !== 'extension')
-            throw new Error('Shortcut assignments changed; request approval again');
-        this._approvedSnapshot = request.snapshot;
-        this._sync();
-        this._approvalChanged(this.approved, false);
+    get active() {
+        return this._settings.get_boolean('shortcuts-enabled') &&
+            this._settings.get_string('shortcut-setup') === 'extension';
     }
 
     _remove(mode) {
@@ -86,7 +65,7 @@ export class ShortcutManager {
         this._syncing = true;
         try {
             const statuses = {};
-            const active = this._settings.get_string('shortcut-setup') === 'extension';
+            const active = this.active;
             for (const {mode, key} of CAPTURE_SHORTCUTS) {
                 const accelerator = this._settings.get_string(key);
                 const previous = this.bindings.get(mode);
@@ -95,10 +74,6 @@ export class ShortcutManager {
                     continue;
                 }
                 if (previous?.accelerator === accelerator) {
-                    Main.wm.allowKeybinding(previous.name, this.approved
-                        ? Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW : Shell.ActionMode.NONE);
-                    if (!this.approved)
-                        statuses[mode] = 'Awaiting approval in GNOME Shell';
                     continue;
                 }
                 let action = Meta.KeyBindingAction.NONE;
@@ -119,10 +94,7 @@ export class ShortcutManager {
                 // Keep the old assignment until the new combination is reserved.
                 this._remove(mode);
                 this.bindings.set(mode, {action, name, accelerator});
-                Main.wm.allowKeybinding(name, this.approved
-                    ? Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW : Shell.ActionMode.NONE);
-                if (!this.approved)
-                    statuses[mode] = 'Awaiting approval in GNOME Shell';
+                Main.wm.allowKeybinding(name, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW);
             }
             this._settings.set_value('shortcut-status', new GLib.Variant('a{ss}', statuses));
         } finally {
@@ -139,7 +111,6 @@ export class ShortcutManager {
         this._settings.set_value('shortcut-status', new GLib.Variant('a{ss}', {}));
         this._settings = null;
         this._capture = null;
-        this._approvalChanged = null;
-        this._approvedSnapshot = null;
+        this._changed = null;
     }
 }
