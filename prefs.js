@@ -8,6 +8,7 @@ import {buildFilename} from './filename.js';
 import {createEntryRow, createSwitchRow} from './prefs-compat.js';
 import {ensureSaveLocation} from './location.js';
 import {formatDelay, parseDelaySeconds} from './delay.js';
+import {createCaptureIcon} from './capture-icons.js';
 
 Gio.Resource.load(`${PKGDATADIR}/gnome-shell-icons.gresource`)._register();
 
@@ -120,18 +121,17 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const commandRows = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE,
             css_classes: ['boxed-list']});
         shortcutContent.append(commandRows);
-        Gtk.IconTheme.get_for_display(window.get_display()).add_resource_path('/org/gnome/shell/icons');
-        for (const [mode, title, icon] of [
-            ['selection', 'Selection', 'screenshot-ui-area-symbolic'],
-            ['screen', 'Screen', 'screenshot-ui-display-symbolic'],
-            ['window', 'Window', 'screenshot-ui-window-symbolic'],
+        for (const [mode, title] of [
+            ['selection', 'Selection'],
+            ['screen', 'Screen'],
+            ['window', 'Window'],
         ]) {
             const command = `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture ${mode}`;
             const row = new Adw.PreferencesRow({title, activatable: false});
             const content = new Gtk.Box({spacing: 12, margin_top: 10, margin_bottom: 10,
                 margin_start: 12, margin_end: 12});
             row.set_child(content);
-            content.append(new Gtk.Image({icon_name: icon, pixel_size: 28, valign: Gtk.Align.CENTER}));
+            content.append(new Gtk.Image({gicon: createCaptureIcon(mode), pixel_size: 28, valign: Gtk.Align.CENTER}));
             const text = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2, hexpand: true});
             text.append(new Gtk.Label({label: title, xalign: 0, css_classes: ['caption', 'dim-label']}));
             const commandField = new Gtk.Entry({text: command, editable: false, has_frame: false,

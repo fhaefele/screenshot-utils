@@ -20,7 +20,7 @@ export default [
         languageOptions: {globals: globals.node},
     },
     {
-        files: ['extension.js', 'capture-selectors.js', 'shell-compat.js', 'location.js', 'filename.js', 'delay.js', 'async-utils.js', 'legacy-runtime.js'],
+        files: ['extension.js', 'capture-selectors.js', 'capture-icons.js', 'shell-compat.js', 'location.js', 'filename.js', 'delay.js', 'async-utils.js', 'legacy-runtime.js'],
         rules: {'no-restricted-imports': ['error', {patterns: ['gi://Gtk*', 'gi://Gdk', 'gi://Gdk?*', 'gi://Adw*', 'node:*']}]},
     },
     {

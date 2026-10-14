@@ -20,6 +20,7 @@ import {AreaSelector, CommandConfirmation, WindowPicker} from './capture-selecto
 import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
+import {createCaptureIcon} from './capture-icons.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
@@ -73,11 +74,11 @@ class CaptureButton extends PanelMenu.Button {
             layout_manager: new Clutter.BoxLayout({spacing: 4, homogeneous: true}),
         });
         captureRow.add_child(captures);
-        this._selectionButton = this._addIconButton(captures, 'screenshot-ui-area-symbolic',
+        this._selectionButton = this._addIconButton(captures, createCaptureIcon('selection'),
             'Selection', () => extension._selectArea());
-        this._screenButton = this._addIconButton(captures, 'screenshot-ui-display-symbolic',
+        this._screenButton = this._addIconButton(captures, createCaptureIcon('screen'),
             'Screen', () => extension._capture('screen'));
-        this._windowButton = this._addIconButton(captures, 'screenshot-ui-window-symbolic',
+        this._windowButton = this._addIconButton(captures, createCaptureIcon('window'),
             'Window', () => extension._openWindowUi());
 
         const tools = new St.Widget({
@@ -146,7 +147,8 @@ class CaptureButton extends PanelMenu.Button {
             style: utility
                 ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
                 : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
-            child: new St.Icon({icon_name: icon, icon_size: utility ? 16 : 32,
+            child: new St.Icon({...(typeof icon === 'string' ? {icon_name: icon} : {gicon: icon}),
+                icon_size: utility ? 16 : 32,
                 x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}),
         });
         button.connect('clicked', action);

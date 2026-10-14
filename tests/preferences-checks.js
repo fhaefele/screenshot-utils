@@ -111,8 +111,9 @@ export async function checkPreferences(preferences) {
             const commandField = rowWidgets.find(widget => widget instanceof Gtk.Entry);
             assert(commandField?.text === expectedCommand && !commandField.editable && !commandField.has_frame,
                 `${title} command is not a read-only single-line text field`);
-            assert(rowWidgets.some(widget => widget instanceof Gtk.Image && widget.icon_name === icon && widget.pixel_size === 28) &&
-                Gtk.IconTheme.get_for_display(window.get_display()).has_icon(icon), `${title} capture icon is missing`);
+            assert(rowWidgets.some(widget => widget instanceof Gtk.Image && widget.gicon instanceof Gio.FileIcon &&
+                widget.gicon.get_file().get_uri() === `resource:///org/gnome/shell/icons/scalable/actions/${icon}.svg` &&
+                widget.pixel_size === 28), `${title} capture icon is missing`);
             const copy = rowWidgets.find(widget => widget instanceof Gtk.Button && widget.icon_name === 'edit-copy-symbolic');
             assert(copy?.get_child().pixel_size === 16, `${title} command has no small standard copy icon`);
             copy.emit('clicked');
