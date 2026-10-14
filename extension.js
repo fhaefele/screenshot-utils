@@ -193,8 +193,8 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
         this._commandDialog = null;
         this._commandPermissionChangedId = this._settings.connect('changed::enable-shortcut-commands', () => {
-            if (this._settings.get_boolean('enable-shortcut-commands'))
-                return;
+            // External false→true changes may be queued together. The current
+            // value cannot prove that an approved request stayed authorized.
             this._run.commandEpoch++;
             this._cancelCommandDialog();
             if (this._selector && this._selector.command !== null)

@@ -498,6 +498,31 @@ export async function run() {
         await waitUntil(() => !extension._busy, 'Revoked command delay did not finish');
         assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
             'Re-enabling access revived an approved screenshot');
+        await requestCapture('screen');
+        await allowCommand();
+        await Scripting.sleep(50);
+        const commandEpoch = extension._run.commandEpoch;
+        const externalToggle = Gio.Subprocess.new(['gjs', '-c', `
+            const Gio = imports.gi.Gio;
+            const source = Gio.SettingsSchemaSource.new_from_directory(ARGV[0] + '/schemas',
+                Gio.SettingsSchemaSource.get_default(), false);
+            const settings = new Gio.Settings({settings_schema: source.lookup('org.gnome.shell.extensions.screenshot-utils', true)});
+            settings.set_boolean('enable-shortcut-commands', false);
+            Gio.Settings.sync();
+            settings.set_boolean('enable-shortcut-commands', true);
+            Gio.Settings.sync();
+        `, extension.path], Gio.SubprocessFlags.NONE);
+        // Delay Shell's notification dispatch until the external setting is true.
+        externalToggle.wait_check(null);
+        assert(settings.get_boolean('enable-shortcut-commands'), 'External toggle did not re-enable commands');
+        // Backends may coalesce the writes. Exercise their queued changed signal
+        // with the final value, then also allow actual external notifications.
+        extension._settings.emit('changed::enable-shortcut-commands', 'enable-shortcut-commands');
+        assert(extension._run.commandEpoch > commandEpoch,
+            'An enabled-value notification preserved an approved command');
+        await waitUntil(() => !extension._busy, 'External revocation did not finish');
+        assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Queued external revocation revived an approved screenshot');
         settings.set_int('capture-delay-ms', 0);
         for (const mode of ['selection', 'window']) {
             await requestCapture(mode);
