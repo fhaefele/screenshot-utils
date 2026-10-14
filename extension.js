@@ -16,7 +16,7 @@ import {Tooltip} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 import {buildFilename} from './filename.js';
 import {createNotificationSource, createSecondaryClickBin, showNotification} from './shell-compat.js';
-import {AreaSelector, WindowPicker} from './capture-selectors.js';
+import {AreaSelector, CommandConfirmation, WindowPicker} from './capture-selectors.js';
 import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
@@ -190,7 +190,22 @@ export default class ScreenshotUtilsExtension extends Extension {
         ensureSaveLocation(this._settings);
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
-        this._run = {cancellable: new Gio.Cancellable(), pending: new Set()};
+        this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
+        this._commandDialog = null;
+        this._commandPermissionChangedId = this._settings.connect('changed::enable-shortcut-commands', () => {
+            if (this._settings.get_boolean('enable-shortcut-commands'))
+                return;
+            this._run.commandEpoch++;
+            this._cancelCommandDialog();
+            if (this._selector && this._selector.command !== null)
+                this._cancelSelector();
+            if (this._windowSession && this._windowSession.command !== null)
+                this._cancelWindowUi();
+            for (const cancel of this._run.pending) {
+                if (cancel.command !== null)
+                    cancel();
+            }
+        });
         this._busy = false;
         this._selector = null;
         this._windowSession = null;
@@ -213,6 +228,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
+        this._cancelCommandDialog();
         this._cancelSelector();
         this._cancelWindowUi();
         this._notificationSource?.destroy();
@@ -226,6 +242,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._button = null;
         if (this._locationChangedId)
             this._settings.disconnect(this._locationChangedId);
+        if (this._commandPermissionChangedId)
+            this._settings.disconnect(this._commandPermissionChangedId);
+        this._commandPermissionChangedId = 0;
         this._locationChangedId = 0;
         this._settings = null;
         this._lockdownSettings = null;
@@ -237,8 +256,17 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Capture cancelled');
     }
 
-    _checkCaptureAllowed(run) {
+    _checkCommandAllowed(run, command) {
         this._checkActive(run);
+        if (command !== null && (command !== run.commandEpoch ||
+            !this._settings.get_boolean('enable-shortcut-commands')))
+            throw new Error('Screenshot command permission was revoked');
+    }
+
+    _checkCaptureAllowed(run, command = null) {
+        this._checkCommandAllowed(run, command);
+        if (Main.sessionMode.isLocked || Main.sessionMode.isGreeter)
+            throw new Error('Screenshot controls are unavailable');
         if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
             throw new Error('Saving screenshots is disabled by system policy');
     }
@@ -249,13 +277,12 @@ export default class ScreenshotUtilsExtension extends Extension {
                 'Enable Allow shortcut commands in Screenshot Utils preferences first');
             return;
         }
-        const actions = {
-            selection: () => this._selectArea(),
-            screen: () => this._capture('screen'),
-            window: () => this._openWindowUi(),
-        };
-        if (!Object.prototype.hasOwnProperty.call(actions, mode)) {
+        if (!['selection', 'screen', 'window'].includes(mode)) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
+            return;
+        }
+        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
             return;
         }
         if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
@@ -268,20 +295,60 @@ export default class ScreenshotUtilsExtension extends Extension {
                 'Saving screenshots is disabled by system policy');
             return;
         }
-        if (this._busy || this._selector || this._windowSession) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
-            return;
-        }
         const run = this._run;
-        actions[mode]().catch(error => {
+        this._runCommand(mode, run, run.commandEpoch).catch(error => {
             if (this._run === run)
                 this._notify(`Screenshot failed: ${error.message}`);
         });
-        // The shortcut command exits immediately; the picker/delay continues in Shell.
+        // Reply immediately; Shell requires a user gesture for each command.
         invocation.return_value(null);
     }
 
-    _wait(milliseconds, run, object = null, signal = null, isReady = null) {
+    async _runCommand(mode, run, command) {
+        this._busy = true;
+        let allowed;
+        let dialog = null;
+        try {
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
+            dialog = new CommandConfirmation();
+            this._commandDialog = dialog;
+            const choice = new Promise(resolve => {
+                dialog.connect('destroy', () => resolve(false));
+                dialog.populate(mode, choice => {
+                    dialog.cancelled ||= !choice;
+                    resolve(choice);
+                });
+            });
+            if (!dialog.open())
+                throw new Error('Could not grab screenshot confirmation input');
+            allowed = await choice;
+            await this._wait(0, run, null, null, null, command);
+            this._checkCaptureAllowed(run, command);
+            allowed &&= !dialog.cancelled;
+        } finally {
+            if (this._commandDialog === dialog)
+                this._cancelCommandDialog();
+            if (this._run === run)
+                this._busy = false;
+        }
+        if (!allowed)
+            return;
+        if (mode === 'selection')
+            await this._selectArea(command);
+        else if (mode === 'window')
+            await this._openWindowUi(command);
+        else
+            await this._capture('screen', null, null, command);
+    }
+
+    _cancelCommandDialog() {
+        const dialog = this._commandDialog;
+        this._commandDialog = null;
+        dialog?.cancel();
+    }
+
+    _wait(milliseconds, run, object = null, signal = null, isReady = null, command = null) {
         return new Promise((resolve, reject) => {
             this._checkActive(run);
             let timeoutId = 0;
@@ -299,6 +366,7 @@ export default class ScreenshotUtilsExtension extends Extension {
                     resolve();
             };
             const cancel = () => finish(new Error('Capture cancelled'));
+            cancel.command = command;
             run.pending.add(cancel);
             timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, milliseconds, () => {
                 timeoutId = 0;
@@ -316,13 +384,13 @@ export default class ScreenshotUtilsExtension extends Extension {
         });
     }
 
-    async _prepareCapture(run) {
-        this._checkActive(run);
+    async _prepareCapture(run, command = null) {
+        this._checkCommandAllowed(run, command);
         // PopupMenu changed close() parameters in Shell 51.
         this._button.menu.close(SHELL_MAJOR >= 51
             ? {animate: false} : 0);
-        await this._wait(0, run);
-        this._checkActive(run);
+        await this._wait(0, run, null, null, null, command);
+        this._checkCommandAllowed(run, command);
     }
 
     _patchScreenshotSound() {
@@ -361,11 +429,12 @@ export default class ScreenshotUtilsExtension extends Extension {
         selector?.cancel();
     }
 
-    async _selectArea() {
-        if (!this._run || this._selector || this._busy || this._windowSession)
+    async _selectArea(command = null) {
+        if (!this._run || this._selector || this._busy || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
         const selector = new AreaSelector();
+        selector.command = command;
         this._selector = selector;
         let cancelled = false;
         let rect;
@@ -393,12 +462,13 @@ export default class ScreenshotUtilsExtension extends Extension {
                 y_expand: true,
                 translation_y: -24,
             }));
-            await this._prepareCapture(run);
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
             rect = await selector.selectAsync();
             // Finish native input dispatch before destroying the selection actor.
             // Unlike SelectArea's idle, this source is cancelled on disable.
             await this._wait(0, run);
-            this._checkActive(run);
+            this._checkCaptureAllowed(run, command);
             // Native geometry can use its initial coordinates when no drag occurred.
             if (cancelled || !selector._rubberband.visible)
                 rect = null;
@@ -411,7 +481,7 @@ export default class ScreenshotUtilsExtension extends Extension {
             selector.cancel();
         }
         if (this._run === run && rect?.width > 1 && rect.height > 1)
-            await this._capture('area', rect);
+            await this._capture('area', rect, null, command);
     }
 
     async _openPreferences() {
@@ -432,17 +502,17 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    async _chooseWindow(picker, window, run) {
+    async _chooseWindow(picker, window, run, command = null) {
         if (this._windowSession !== picker || this._run !== run || picker.selected || picker.cancelled)
             return;
         picker.selected = window;
         try {
             // Finish the button event before destroying its actor.
-            await this._wait(0, run);
+            await this._wait(0, run, null, null, null, command);
             if (this._windowSession !== picker || picker.cancelled)
                 return;
             this._cancelWindowUi();
-            await this._capture('window', null, window);
+            await this._capture('window', null, window, command);
         } catch (error) {
             if (this._run === run)
                 this._notify(`Window selection failed: ${error.message}`);
@@ -469,14 +539,15 @@ export default class ScreenshotUtilsExtension extends Extension {
         picker?.cancel();
     }
 
-    async _openWindowUi() {
-        if (!this._run || this._busy || this._selector || this._windowSession)
+    async _openWindowUi(command = null) {
+        if (!this._run || this._busy || this._selector || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
         this._busy = true;
         let picker = null;
         try {
-            await this._prepareCapture(run);
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
             const ui = Main.screenshotUI;
             if (ui.visible || ui._openingCoroutineInProgress || ui._screencastInProgress)
                 throw new Error('GNOME screenshot UI is already in use');
@@ -489,9 +560,10 @@ export default class ScreenshotUtilsExtension extends Extension {
             if (!windows.length)
                 throw new Error('No windows available to capture');
             picker = new WindowPicker();
+            picker.command = command;
             this._windowSession = picker;
             picker.populate(windows,
-                window => this._chooseWindow(picker, window, run),
+                window => this._chooseWindow(picker, window, run, command),
                 () => this._cancelWindowSelection(picker, run));
             if (!picker.open())
                 throw new Error('Could not grab window selection input');
@@ -507,35 +579,35 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    async _focusWindow(window, run) {
+    async _focusWindow(window, run, command) {
         window.activate(global.get_current_time());
         await this._wait(2000, run, global.display, 'notify::focus-window',
-            () => global.display.get_focus_window() === window);
-        this._checkActive(run);
+            () => global.display.get_focus_window() === window, command);
+        this._checkCaptureAllowed(run, command);
     }
 
-    async _capture(kind, rect = null, selectedWindow = null) {
-        if (!this._run || this._busy || this._selector || this._windowSession)
+    async _capture(kind, rect = null, selectedWindow = null, command = null) {
+        if (!this._run || this._busy || this._selector || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
         const settings = this._settings;
         this._busy = true;
         let countdown = null;
         try {
-            this._checkCaptureAllowed(run);
-            await this._prepareCapture(run);
+            this._checkCaptureAllowed(run, command);
+            await this._prepareCapture(run, command);
             const delay = settings.get_int('capture-delay-ms');
             if (delay > 0) {
                 if (delay >= 1000)
                     countdown = this._notify(`Capturing in ${formatDelay(delay)}…`);
                 countdown?.connect('destroy', () => { countdown = null; });
-                await this._wait(delay, run);
+                await this._wait(delay, run, null, null, null, command);
                 if (countdown) {
                     countdown.destroy();
-                    await this._wait(MessageTray.ANIMATION_TIME, run);
+                    await this._wait(MessageTray.ANIMATION_TIME, run, null, null, null, command);
                 }
             }
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const screenshot = new Shell.Screenshot();
             const stream = Gio.MemoryOutputStream.new_resizable();
             try {
@@ -544,14 +616,14 @@ export default class ScreenshotUtilsExtension extends Extension {
                 } else if (kind === 'window') {
                     if (!selectedWindow)
                         throw new Error('Choose a window to capture');
-                    await this._focusWindow(selectedWindow, run);
+                    await this._focusWindow(selectedWindow, run, command);
                     await callAsync(screenshot, 'screenshot_window',
                         true,
                         settings.get_boolean('include-cursor'), stream);
                 } else {
                     if (settings.get_boolean('include-cursor')) {
                         const [content, scale, cursor, point, cursorScale] = await callAsync(screenshot, 'screenshot_stage_to_content');
-                        this._checkActive(run);
+                        this._checkCaptureAllowed(run, command);
                         const texture = content.get_texture();
                         const x = Math.round(rect.x * scale);
                         const y = Math.round(rect.y * scale);
@@ -569,19 +641,19 @@ export default class ScreenshotUtilsExtension extends Extension {
             } finally {
                 stream.close(null);
             }
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const bytes = stream.steal_as_bytes();
             if (bytes.get_size() === 0)
                 throw new Error('GNOME returned an empty screenshot');
             const directory = this._getSaveDirectory(settings);
             await ensureDirectory(directory, run.cancellable);
             const {file, stream: output} = await this._createUniqueFile(
-                directory, settings.get_string('filename-template'), kind, run);
+                directory, settings.get_string('filename-template'), kind, run, command);
             try {
-                this._checkCaptureAllowed(run);
-                await this._writeBytes(output, bytes, run);
+                this._checkCaptureAllowed(run, command);
+                await this._writeBytes(output, bytes, run, command);
                 await callAsync(output, 'close_async', GLib.PRIORITY_DEFAULT, run.cancellable);
-                this._checkCaptureAllowed(run);
+                this._checkCaptureAllowed(run, command);
             } catch (error) {
                 try {
                     await callAsync(output, 'close_async', GLib.PRIORITY_DEFAULT, null);
@@ -619,10 +691,10 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    async _writeBytes(output, bytes, run) {
+    async _writeBytes(output, bytes, run, command = null) {
         const size = bytes.get_size();
         for (let offset = 0; offset < size;) {
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             // GBytes keeps the buffer alive throughout asynchronous writes.
             const remaining = offset ? GLib.Bytes.new_from_bytes(bytes, offset, size - offset) : bytes;
             const written = await callAsync(output, 'write_bytes_async', remaining, GLib.PRIORITY_DEFAULT, run.cancellable);
@@ -636,10 +708,10 @@ export default class ScreenshotUtilsExtension extends Extension {
         return Gio.File.new_for_path(getSavePath(settings));
     }
 
-    async _createUniqueFile(directory, template, kind, run) {
+    async _createUniqueFile(directory, template, kind, run, command = null) {
         const now = new Date();
         for (let index = 0; index < 1000; index++) {
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const suffix = index ? `-${index + 1}` : '';
             const file = directory.get_child(buildFilename(template, now, kind, suffix));
             try {

@@ -463,6 +463,82 @@ export async function run() {
         assert(Gio.DBusError.get_remote_error(invalidMode) === 'dev.fxth.ScreenshotUtils.InvalidMode',
             'Capture API accepted an invalid mode');
         settings.set_string('filename-template', 'Shortcut-{N}');
+        const allowCommand = async () => {
+            await waitUntil(() => extension._commandDialog?.visible, 'Command confirmation did not open');
+            await click(pointer, extension._commandDialog._allowButton);
+            await waitUntil(() => !extension._commandDialog, 'Command confirmation did not close');
+        };
+        // Settings are caller-writable. They must never substitute for a Shell gesture.
+        settings.set_int('capture-delay-ms', 0);
+        settings.set_boolean('mute-screenshot-sound', true);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Untrusted command did not require confirmation');
+        await Scripting.sleep(250);
+        await preview('command-confirmation.png');
+        assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Caller-writable settings authorized an unconfirmed screenshot');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._commandDialog && !extension._busy, 'Denied command did not finish');
+        assert(!directory.get_child('Shortcut-screen.png').query_exists(null), 'Denied command saved a screenshot');
+        for (const mode of ['screen', 'selection', 'window']) {
+            await requestCapture(mode);
+            await waitUntil(() => extension._commandDialog?.visible, 'Revocation confirmation did not open');
+            const dialog = extension._commandDialog;
+            settings.set_boolean('enable-shortcut-commands', false);
+            settings.set_boolean('enable-shortcut-commands', true);
+            assert(dialog.destroyed && !extension._commandDialog, 'Revocation left confirmation open');
+            await waitUntil(() => !extension._busy, 'Revoked confirmation did not finish');
+        }
+        settings.set_int('capture-delay-ms', 1000);
+        await requestCapture('screen');
+        await allowCommand();
+        await Scripting.sleep(50);
+        settings.set_boolean('enable-shortcut-commands', false);
+        settings.set_boolean('enable-shortcut-commands', true);
+        await waitUntil(() => !extension._busy, 'Revoked command delay did not finish');
+        assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Re-enabling access revived an approved screenshot');
+        settings.set_int('capture-delay-ms', 0);
+        for (const mode of ['selection', 'window']) {
+            await requestCapture(mode);
+            await allowCommand();
+            await waitUntil(() => mode === 'selection'
+                ? extension._selector?._grabHelper.grabbed : extension._windowSession?.visible,
+            'Approved command picker did not open');
+            const picker = mode === 'selection' ? extension._selector : extension._windowSession;
+            settings.set_boolean('enable-shortcut-commands', false);
+            settings.set_boolean('enable-shortcut-commands', true);
+            assert(picker.destroyed && !extension._selector && !extension._windowSession,
+                'Revocation left command picker open');
+            await waitUntil(() => !extension._busy, 'Revoked picker did not finish');
+        }
+        const createBeforeRevocation = extension._createUniqueFile;
+        try {
+            extension._createUniqueFile = async (...args) => {
+                const output = await createBeforeRevocation.call(extension, ...args);
+                settings.set_boolean('enable-shortcut-commands', false);
+                settings.set_boolean('enable-shortcut-commands', true);
+                return output;
+            };
+            await requestCapture('screen');
+            await allowCommand();
+            await waitUntil(() => !extension._busy, 'Revoked file creation did not finish');
+            assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
+                'Revoked command left an incomplete file');
+        } finally {
+            extension._createUniqueFile = createBeforeRevocation;
+        }
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Disable confirmation did not open');
+        const disabledDialog = extension._commandDialog;
+        extension.disable();
+        extension.enable();
+        assert(disabledDialog.destroyed && !extension._commandDialog && !extension._busy,
+            'Disable/re-enable left command confirmation active');
+        await Scripting.sleep(50);
+        assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
+            'Disable/re-enable revived an unconfirmed command');
+        print('PASS: commands require Shell confirmation; revocation cancels prompts, pickers, delays and incomplete files');
         settings.set_int('capture-delay-ms', 1000);
         const shortcutCommand = Gio.Subprocess.new([
             'gdbus', 'call', '--session', '--dest', 'org.gnome.Shell',
@@ -484,10 +560,12 @@ export async function run() {
         const busyError = await requestCapture('screen').then(() => null, error => error);
         assert(Gio.DBusError.get_remote_error(busyError) === 'dev.fxth.ScreenshotUtils.Busy',
             'Capture API accepted overlapping captures');
+        await allowCommand();
         await waitUntil(() => !extension._busy, 'Shortcut screen capture did not finish');
         checkPng(directory, 'Shortcut-screen.png');
         settings.set_int('capture-delay-ms', 0);
         await requestCapture('selection');
+        await allowCommand();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Shortcut did not open Selection');
         await movePointer(pointer, 100, 100);
         await Scripting.sleep(30);
@@ -499,6 +577,7 @@ export async function run() {
         await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
         checkPng(directory, 'Shortcut-area.png');
         await requestCapture('window');
+        await allowCommand();
         await waitUntil(() => extension._windowSession?.visible, 'Shortcut did not open Window');
         await Scripting.sleep(250);
         await click(pointer, extension._windowSession.windows.keys().next().value);

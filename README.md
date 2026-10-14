@@ -30,7 +30,7 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default; enabling it permits local applications to request screenshots, even with notifications off. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
+Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default. Each command requires confirmation in GNOME Shell, even with notifications off. Turning access off cancels pending command captures; turning it back on requires a new request and confirmation. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection

@@ -109,7 +109,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
         page.add(shortcuts);
         const allowCommands = createSwitchRow(settings, 'enable-shortcut-commands', 'Allow shortcut commands');
-        allowCommands.subtitle = 'Allows local applications to request screenshots, even when notifications are off.';
+        allowCommands.subtitle = 'Allows local applications to request screenshots. Each request requires confirmation in GNOME Shell.';
         shortcuts.add(allowCommands);
         const shortcutContent = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
         shortcuts.add(shortcutContent);

@@ -43,18 +43,49 @@ class AreaSelector extends SelectArea {
     }
 });
 
-export const WindowPicker = GObject.registerClass(
-class WindowPicker extends ModalDialog.ModalDialog {
+const CaptureDialog = GObject.registerClass(
+class CaptureDialog extends ModalDialog.ModalDialog {
     _init() {
         super._init({shouldFadeIn: false, shouldFadeOut: false, destroyOnClose: false});
         this.destroyed = false;
-        this.selected = null;
         this.cancelled = false;
-        this.windows = new Map();
         this.connect('destroy', () => {
             this.destroyed = true;
-            this.selected = null;
             this.cancelled = true;
+        });
+    }
+
+    cancel() {
+        if (this.destroyed)
+            return;
+        this.popModal();
+        this.remove_all_transitions();
+        this.destroy();
+    }
+});
+
+export const CommandConfirmation = GObject.registerClass(
+class CommandConfirmation extends CaptureDialog {
+    populate(mode, onChoice) {
+        const subject = {screen: 'your entire screen', selection: 'a selected area', window: 'a selected window'}[mode];
+        this.contentLayout.add_child(new St.Label({text: 'Allow screenshot command?', style_class: 'headline'}));
+        const description = new St.Label({text: `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
+        description.clutter_text.line_wrap = true;
+        this.contentLayout.add_child(description);
+        this._cancelButton = this.addButton({label: 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
+        this._allowButton = this.addButton({label: 'Allow', action: () => onChoice(true)});
+        this.setInitialKeyFocus(this._cancelButton);
+    }
+});
+
+export const WindowPicker = GObject.registerClass(
+class WindowPicker extends CaptureDialog {
+    _init() {
+        super._init();
+        this.selected = null;
+        this.windows = new Map();
+        this.connect('destroy', () => {
+            this.selected = null;
             this.windows.clear();
         });
     }
@@ -110,11 +141,4 @@ class WindowPicker extends ModalDialog.ModalDialog {
         this.setInitialKeyFocus(this.windows.keys().next().value);
     }
 
-    cancel() {
-        if (this.destroyed)
-            return;
-        this.popModal();
-        this.remove_all_transitions();
-        this.destroy();
-    }
 });
