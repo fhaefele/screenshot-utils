@@ -149,5 +149,6 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
 
         shortcutCleanup = fillShortcutPreferences(window, page, settings, handlers);
         window.add(page);
+        window.set_focus(browse);
     }
 }

@@ -93,6 +93,10 @@ export async function checkPreferences(preferences) {
         const template = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Filename template');
         const preview = widgets.find(widget => widget instanceof Gtk.Label && widget.label.startsWith('Preview: '));
         assert(folder?.text === previousFolder && folder.text.trim(), 'Folder was not prefilled with the saved path');
+        const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
+        window.present();
+        await waitUntil(() => window.get_mapped(), 'Preferences did not open');
+        assert(window.get_focus() === browse, 'Opening preferences focused an editable field');
         folder.text = '';
         folder.emit('apply');
         assert(folder.text === previousFolder && settings.get_string('save-location') === previousFolder,
@@ -291,7 +295,6 @@ export async function checkPreferences(preferences) {
         assert(preview.label === unchangedPreview, 'Preview refreshed without a template edit');
         print('PASS: GTK folder validation, token note, event-driven filename preview and exact delays');
 
-        const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
         assert(browse?.tooltip_text === 'Choose screenshot folder', 'Folder Browse button is missing');
         const root = Gio.File.new_for_path(GLib.dir_make_tmp('screenshot-utils-folder-picker-XXXXXX'));
         const chosen = root.get_child('Screenshots ü folder ');
