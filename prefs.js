@@ -5,8 +5,8 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import {PKGDATADIR} from 'resource:///org/gnome/Shell/Extensions/js/misc/config.js';
 import {buildFilename} from './filename.js';
-import {createEntryRow, createSwitchRow} from './prefs-compat.js';
-import {ensureSaveLocation} from './location.js';
+import {createEntryRow, createSwitchRow, selectFolder} from './prefs-compat.js';
+import {ensureSaveLocation, getSavePath} from './location.js';
 import {formatDelay, parseDelaySeconds} from './delay.js';
 import {createCaptureIcon} from './capture-icons.js';
 
@@ -24,6 +24,8 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         const handlers = [];
+        let closed = false;
+        let folderRequest = null;
         ensureSaveLocation(settings);
         const page = new Adw.PreferencesPage({title: 'Capture', icon_name: 'camera-photo-symbolic'});
         const files = new Adw.PreferencesGroup({title: 'Files'});
@@ -32,8 +34,8 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const folder = createEntryRow({title: 'Screenshot folder',
             text: ensureSaveLocation(settings), show_apply_button: true});
         const applyFolder = () => {
-            const value = folder.get_text().trim();
-            if (value)
+            const value = folder.get_text();
+            if (value.trim())
                 settings.set_string('save-location', value);
             folder.set_text(ensureSaveLocation(settings));
         };
@@ -41,8 +43,44 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         const locationChangedId = settings.connect('changed::save-location',
             () => folder.set_text(ensureSaveLocation(settings)));
         handlers.push([settings, locationChangedId]);
+        const browse = new Gtk.Button({label: 'Browse…', valign: Gtk.Align.CENTER,
+            tooltip_text: 'Choose screenshot folder'});
+        browse.update_property([Gtk.AccessibleProperty.LABEL], ['Choose screenshot folder']);
+        folder.add_suffix(browse);
+        browse.connect('clicked', async () => {
+            if (closed || folderRequest)
+                return;
+            applyFolder();
+            const cancellable = new Gio.Cancellable();
+            folderRequest = cancellable;
+            browse.sensitive = false;
+            try {
+                const selected = await selectFolder(window,
+                    Gio.File.new_for_path(getSavePath(settings)), cancellable);
+                if (closed || cancellable.is_cancelled() || !selected)
+                    return;
+                const path = selected.get_path();
+                if (!path) {
+                    window.add_toast(new Adw.Toast({title: 'Choose a folder with a local filesystem path'}));
+                    return;
+                }
+                settings.set_string('save-location', path);
+            } catch (error) {
+                if (!closed && !cancellable.is_cancelled()) {
+                    console.warn(`Could not select screenshot folder: ${error.message}`);
+                    window.add_toast(new Adw.Toast({title: 'Could not open folder chooser'}));
+                }
+            } finally {
+                if (folderRequest === cancellable)
+                    folderRequest = null;
+                if (!closed)
+                    browse.sensitive = true;
+            }
+        });
         const applyEntries = [applyFolder];
         window.connect('close-request', () => {
+            closed = true;
+            folderRequest?.cancel();
             for (const apply of applyEntries)
                 apply();
             // Focus controllers can emit leave during GTK disposal. Disconnect

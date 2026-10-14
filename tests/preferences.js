@@ -1,7 +1,13 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
-import 'gi://Gtk?version=4.0';
+import Gtk from 'gi://Gtk?version=4.0';
 import GLib from 'gi://GLib';
+
+// Exercise the actual GTK chooser in-process; production retains portal support.
+GLib.setenv('GTK_USE_PORTAL', '0', true);
+GLib.setenv('ADW_DISABLE_PORTAL', '1', true);
+if (Gtk.get_minor_version() >= 18)
+    GLib.setenv('GDK_DEBUG', 'no-portals', true);
 
 Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.package.init({name: 'gnome-shell', prefix: '/usr', libdir: '/usr/lib'});

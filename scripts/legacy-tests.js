@@ -7,6 +7,10 @@ await bundleLegacy('tests/shell.js', resolve('dist/tests/perf/screenshotUtils.js
     {footer: 'var METRICS = {};\nfunction run() { return ScreenshotUtilsTests.run(); }\nfunction finish() {}'});
 await bundleLegacy('tests/preferences-checks.js', resolve('dist/tests/preferences-legacy.js'), 'ScreenshotUtilsPreferencesChecks', {preamble: `
 imports.gi.versions.Gtk = '4.0';
+imports.gi.GLib.setenv('GTK_USE_PORTAL', '0', true);
+imports.gi.GLib.setenv('ADW_DISABLE_PORTAL', '1', true);
+if (imports.gi.Gtk.get_minor_version() >= 18)
+    imports.gi.GLib.setenv('GDK_DEBUG', 'no-portals', true);
 imports.gi.Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.searchPath.unshift('resource:///org/gnome/Shell/Extensions/js');
 imports.gi.Adw.init();`, footer: `
