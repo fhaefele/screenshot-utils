@@ -606,6 +606,18 @@ export async function run() {
         print('PASS: window picker Escape');
 
         await extension._openWindowUi();
+        const racePicker = extension._windowSession;
+        const raceWindow = racePicker.windows.values().next().value;
+        await Promise.all([
+            extension._chooseWindow(racePicker, raceWindow, extension._run),
+            extension._cancelWindowSelection(racePicker, extension._run),
+        ]);
+        assert(racePicker.destroyed && !extension._windowSession && !extension._busy &&
+            !directory.get_child('Integration-window-3.png').query_exists(null),
+        'Cancellation lost a race with window selection');
+        print('PASS: cancellation wins simultaneous window selection');
+
+        await extension._openWindowUi();
         await click(pointer, extension._windowSession._closeButton);
         await waitUntil(() => !extension._windowSession, 'Cancel button did not cancel window selection');
         assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window picker Cancel took a screenshot');

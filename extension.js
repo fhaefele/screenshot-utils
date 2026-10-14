@@ -439,7 +439,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         try {
             // Finish the button event before destroying its actor.
             await this._wait(0, run);
-            if (this._windowSession !== picker)
+            if (this._windowSession !== picker || picker.cancelled)
                 return;
             this._cancelWindowUi();
             await this._capture('window', null, window);

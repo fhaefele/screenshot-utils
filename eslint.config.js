@@ -21,7 +21,7 @@ export default [
     },
     {
         files: ['extension.js', 'capture-selectors.js', 'shell-compat.js', 'location.js', 'filename.js', 'delay.js', 'async-utils.js', 'legacy-runtime.js'],
-        rules: {'no-restricted-imports': ['error', {patterns: ['gi://Gtk*', 'gi://Gdk*', 'gi://Adw*', 'node:*']}]},
+        rules: {'no-restricted-imports': ['error', {patterns: ['gi://Gtk*', 'gi://Gdk', 'gi://Gdk?*', 'gi://Adw*', 'node:*']}]},
     },
     {
         files: ['prefs.js', 'prefs-compat.js'],
