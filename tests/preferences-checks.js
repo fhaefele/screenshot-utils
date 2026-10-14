@@ -155,7 +155,7 @@ export async function checkPreferences(preferences) {
         }
 
         const shortcuts = widgets.find(widget => widget instanceof Adw.PreferencesGroup &&
-            widget.title === 'Keyboard Shortcuts');
+            widget.title === 'Keyboard shortcuts');
         assert(shortcuts, 'Keyboard shortcut instructions are missing');
         const shortcutWidgets = descendants(shortcuts);
         const enableShortcuts = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
@@ -169,7 +169,7 @@ export async function checkPreferences(preferences) {
             settings.get_string('shortcut-setup') === 'gnome',
             'Master switch did not reveal the default GNOME source');
         assert(setup.model.get_n_items() === 2 &&
-            setup.model.get_string(0) === 'GNOME Keyboard Settings' && setup.model.get_string(1) === 'Extension',
+            setup.model.get_string(0) === 'GNOME keyboard settings' && setup.model.get_string(1) === 'Extension',
             'Source choices differ from the two supported modes');
         const sourceExplanation = setup.subtitle;
         setup.selected = 0;
@@ -210,27 +210,27 @@ export async function checkPreferences(preferences) {
                 `${title} text selection did not copy the complete command`);
         }
         const openKeyboardSettings = shortcutWidgets.find(widget => widget instanceof Gtk.Button &&
-            widget.label === 'Keyboard Settings');
-        assert(openKeyboardSettings, 'Keyboard Settings button is missing');
+            widget.label === 'Keyboard settings');
+        assert(openKeyboardSettings, 'Keyboard settings button is missing');
         const originalCreateApp = Gio.AppInfo.create_from_commandline;
         try {
             let launched = false;
             Gio.AppInfo.create_from_commandline = (command, _name, flags) => {
-                assert(command === 'gnome-control-center keyboard', 'Wrong Keyboard Settings command');
+                assert(command === 'gnome-control-center keyboard', 'Wrong Keyboard settings command');
                 assert(flags === Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION,
-                    'Keyboard Settings launch has no activation context');
+                    'Keyboard settings launch has no activation context');
                 return {launch: (files, context) => { launched = files.length === 0 && context !== null; }};
             };
             openKeyboardSettings.emit('clicked');
-            assert(launched, 'Keyboard Settings button did not launch the panel');
-            Gio.AppInfo.create_from_commandline = () => { throw new Error('Keyboard Settings unavailable in test'); };
+            assert(launched, 'Keyboard settings button did not launch the panel');
+            Gio.AppInfo.create_from_commandline = () => { throw new Error('Keyboard settings unavailable in test'); };
             openKeyboardSettings.emit('clicked');
-            assert(toasts.at(-1) === 'Could not open Keyboard Settings', 'Launch failure has no feedback');
+            assert(toasts.at(-1) === 'Could not open keyboard settings', 'Launch failure has no feedback');
         } finally {
             Gio.AppInfo.create_from_commandline = originalCreateApp;
             window.add_toast = originalAddToast;
         }
-        print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard Settings launch');
+        print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard settings launch');
 
         const permissionRow = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow && widget.title === 'Ask for every request');
         const permission = toggleControl(permissionRow);

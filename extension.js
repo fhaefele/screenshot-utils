@@ -366,7 +366,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         if (!this._settings?.get_boolean('shortcuts-enabled') ||
             this._settings.get_string('shortcut-setup') !== 'gnome') {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Use GNOME Keyboard Settings mode and enable keyboard shortcuts in preferences first');
+                'Use GNOME keyboard settings mode and enable keyboard shortcuts in preferences first');
             return;
         }
         if (!['selection', 'screen', 'window'].includes(mode)) {
@@ -615,7 +615,7 @@ export default class ScreenshotUtilsExtension extends Extension {
             selector.add_child(hint);
             hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
             hint.set_child(new St.Label({
-                text: 'Esc or right-click to cancel',
+                text: 'Escape or right-click to cancel',
                 style_class: 'screenshot-ui-tooltip',
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.END,

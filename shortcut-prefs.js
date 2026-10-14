@@ -110,7 +110,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     let approvalProxy = null;
     let approvalWait = null;
     const cancellable = new Gio.Cancellable();
-    const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
+    const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard shortcuts'});
     page.add(shortcuts);
     const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     shortcuts.add(content);
@@ -122,7 +122,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     const sources = ['gnome', 'extension'];
     const setup = new Adw.ComboRow({title: 'Source',
         subtitle: 'Who should manage your keyboard shortcuts?',
-        model: Gtk.StringList.new(['GNOME Keyboard Settings', 'Extension'])});
+        model: Gtk.StringList.new(['GNOME keyboard settings', 'Extension'])});
     options.append(setup);
     content.append(status);
     const commands = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 6});
@@ -245,18 +245,18 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         commandRows.append(createCaptureRow(mode, title, commandField, copy));
     }
     shortcutContent.append(new Gtk.Label({
-        label: 'Keyboard Settings → View and Customize Shortcuts → Custom Shortcuts → Add.',
+        label: 'Keyboard settings → View and customize shortcuts → Custom shortcuts → Add.',
         selectable: true, ...noteStyle,
     }));
-    const keyboardSettings = new Gtk.Button({label: 'Keyboard Settings', halign: Gtk.Align.END, margin_top: 6});
+    const keyboardSettings = new Gtk.Button({label: 'Keyboard settings', halign: Gtk.Align.END, margin_top: 6});
     keyboardSettings.connect('clicked', () => {
         try {
             const app = Gio.AppInfo.create_from_commandline('gnome-control-center keyboard',
-                'Keyboard Settings', Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION);
+                'Keyboard settings', Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION);
             app.launch([], window.get_display().get_app_launch_context());
         } catch (error) {
             console.warn(error);
-            window.add_toast(new Adw.Toast({title: 'Could not open Keyboard Settings'}));
+            window.add_toast(new Adw.Toast({title: 'Could not open keyboard settings'}));
         }
     });
     shortcutContent.append(keyboardSettings);

@@ -76,7 +76,7 @@ class CommandConfirmation extends CaptureDialog {
         const content = new Dialog.MessageDialogContent({
             title: approval ? 'Allow screenshots without asking for permission?' : 'Allow screenshot command?',
             description: approval
-                ? 'With GNOME Keyboard Settings as the source, other apps can run these screenshot commands.\n\nChoose <b>Ask for every request</b> to approve each screenshot. Choose <b>Skip confirmation</b> to allow all requests automatically.'
+                ? 'With GNOME keyboard settings as the source, other apps can run these screenshot commands.\n\nChoose <b>Ask for every request</b> to approve each screenshot. Choose <b>Skip confirmation</b> to allow all requests automatically.'
                 : `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`,
         });
         const title = content.get_first_child().clutter_text;
@@ -171,7 +171,7 @@ class WindowPicker extends CaptureDialog {
         const monitor = Main.layoutManager.currentMonitor;
         const columns = Math.max(1, Math.min(4, Math.floor(monitor.width * 0.75 / 240)));
         this.contentLayout.add_child(new St.Label({text: 'Choose a window', style_class: 'headline'}));
-        this.contentLayout.add_child(new St.Label({text: 'Esc or right-click to cancel', style_class: 'dim-label'}));
+        this.contentLayout.add_child(new St.Label({text: 'Escape or right-click to cancel', style_class: 'dim-label'}));
         const scroll = new St.ScrollView({
             hscrollbar_policy: St.PolicyType.NEVER,
             vscrollbar_policy: St.PolicyType.AUTOMATIC,

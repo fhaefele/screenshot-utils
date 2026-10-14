@@ -28,11 +28,11 @@ gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 
 After installing or updating, log out/in, then enable in Extensions. Build from source with `npm ci && npm run pack`; ZIPs written to `dist/legacy/` and `dist/modern/`. The legacy entry points are generated from the shared source.
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
-Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME Keyboard Settings** or **Extension** under **Source**. New setups select GNOME Keyboard Settings. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select GNOME keyboard settings. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
 
-**GNOME Keyboard Settings** preserves existing custom shortcuts. Add a name, command and key in View and Customize Shortcuts → Custom Shortcuts. Preferences provides copy buttons and opens Keyboard Settings. Commands also work in a terminal:
+**GNOME keyboard settings** preserves existing custom shortcuts. Add a name, command and key in View and customize shortcuts → Custom shortcuts. Preferences provides copy buttons and opens Keyboard settings. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -44,7 +44,7 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 
 **Extension** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
 
-Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME Keyboard Settings. Turning command access off cancels pending command captures.
+Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME keyboard settings. Turning command access off cancels pending command captures.
 
 ## Test
 
