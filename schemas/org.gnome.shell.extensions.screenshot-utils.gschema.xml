@@ -30,7 +30,7 @@
     </key>
     <key name="shortcuts-enabled" type="b">
       <default>false</default>
-      <summary>Enable screenshot shortcuts</summary>
+      <summary>Enable keyboard shortcuts</summary>
       <description>Enable the chosen shortcut source. Turning off cancels shortcut captures and revokes command approval.</description>
     </key>
     <key name="shortcut-setup" type="s">

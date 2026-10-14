@@ -347,7 +347,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         if (!this._settings?.get_boolean('shortcuts-enabled') ||
             this._settings.get_string('shortcut-setup') !== 'gnome') {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Use GNOME Keyboard Settings mode and enable screenshot shortcuts in preferences first');
+                'Use GNOME Keyboard Settings mode and enable keyboard shortcuts in preferences first');
             return;
         }
         if (approvalOnly && this._settings.get_boolean('ask-command-confirmation')) {

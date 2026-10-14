@@ -86,8 +86,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     const cancellable = new Gio.Cancellable();
     const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
     page.add(shortcuts);
-    const enabled = createSwitchRow(settings, 'shortcuts-enabled', 'Enable screenshot shortcuts');
-    enabled.subtitle = 'Choose how shortcuts are configured. Panel buttons always remain available.';
+    const enabled = createSwitchRow(settings, 'shortcuts-enabled', 'Enable keyboard shortcuts');
     shortcuts.add(enabled);
     const status = new Gtk.Label({xalign: 0, wrap: true, css_classes: ['dim-label']});
     shortcuts.add(status);
@@ -246,7 +245,8 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         approve.sensitive = available && !approved && !requestingApproval;
         const assigned = CAPTURE_SHORTCUTS.filter(({key}) => settings.get_string(key));
         const warnings = Object.values(settings.get_value('shortcut-status').deep_unpack());
-        status.label = !on ? 'Off' : !available ? 'Extension disabled' : !source ? 'Choose a shortcut source' : source === 'extension'
+        status.visible = on;
+        status.label = !on ? '' : !available ? 'Extension disabled' : !source ? 'Choose a shortcut source' : source === 'extension'
             ? !assigned.length ? 'No shortcuts assigned' : warnings.length >= assigned.length ? 'No available shortcuts' : warnings.length ? 'Active with shortcut warnings' : 'Active'
             : !ask && !approved ? 'Approval required' : 'Active';
     };

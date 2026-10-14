@@ -141,7 +141,7 @@ export async function checkPreferences(preferences) {
         assert(shortcuts, 'Keyboard shortcut instructions are missing');
         const shortcutWidgets = descendants(shortcuts);
         const enableShortcuts = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
-            widget.title === 'Enable screenshot shortcuts');
+            widget.title === 'Enable keyboard shortcuts');
         const commandSwitch = Adw.SwitchRow ? enableShortcuts : descendants(enableShortcuts).find(widget => widget instanceof Gtk.Switch);
         const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Shortcut source');
         assert(!commandSwitch.active && !setup.visible && setup.selected === 0,
