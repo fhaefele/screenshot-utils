@@ -32,7 +32,9 @@ const CAPTURE_INTERFACE = `<node>
             <arg type="s" name="mode" direction="in"/>
         </method>
         <method name="ApproveSilentCommands"/>
+        <method name="ApproveNativeShortcuts"/>
         <property name="SilentCommandsApproved" type="b" access="read"/>
+        <property name="NativeShortcutsApproved" type="b" access="read"/>
     </interface>
 </node>`;
 
@@ -210,14 +212,24 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._injectionManager = new InjectionManager();
         this._patchScreenshotSound();
         this._shortcuts = new ShortcutManager(this._settings, mode => {
-            this._captureMode(mode).catch(error => this._notify(`Screenshot failed: ${error.message}`));
+            const command = {native: this._shortcuts, epoch: this._shortcuts.epoch};
+            this._captureMode(mode, command).catch(error => this._notify(`Screenshot failed: ${error.message}`));
+        }, (approved, invalidated) => {
+            if (invalidated) {
+                if (this._commandDialog?.native)
+                    this._cancelCommandDialog();
+                this._cancelCapturesMatching(command => command?.native === this._shortcuts);
+            }
+            this._dbus?.emit_property_changed('NativeShortcutsApproved', new GLib.Variant('b', approved));
         });
         this._shortcuts.enable();
         const extension = this;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
             ApproveSilentCommandsAsync: (_params, invocation) => this._requestCapture('screen', invocation, true),
+            ApproveNativeShortcutsAsync: (_params, invocation) => this._requestNativeApproval(invocation),
             get SilentCommandsApproved() { return extension._silentCommandsApproved(); },
+            get NativeShortcutsApproved() { return extension._shortcuts?.approved ?? false; },
         });
         this._dbus.export(Gio.DBus.session, CAPTURE_BUS_PATH);
     }
@@ -226,6 +238,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         const run = this._run;
         this._run = null;
         this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
+        this._dbus?.emit_property_changed('NativeShortcutsApproved', new GLib.Variant('b', false));
         this._dbus?.unexport();
         this._dbus = null;
         this._shortcuts?.destroy();
@@ -263,6 +276,12 @@ export default class ScreenshotUtilsExtension extends Extension {
 
     _checkCommandAllowed(run, command) {
         this._checkActive(run);
+        if (command?.native) {
+            if (command.native !== this._shortcuts || command.epoch !== this._shortcuts.epoch ||
+                !this._shortcuts.approved)
+                throw new Error('Screenshot shortcut permission was revoked');
+            return;
+        }
         if (command !== null && (command !== run.commandEpoch ||
             this._settings.get_string('shortcut-setup') !== 'gnome' ||
             !this._settings.get_boolean('enable-shortcut-commands')))
@@ -278,13 +297,18 @@ export default class ScreenshotUtilsExtension extends Extension {
         run.commandEpoch++;
         run.silentCommandEpoch = null;
         this._dbus?.emit_property_changed('SilentCommandsApproved', new GLib.Variant('b', false));
-        this._cancelCommandDialog();
-        if (this._selector && this._selector.command !== null)
+        if (!this._commandDialog?.native)
+            this._cancelCommandDialog();
+        this._cancelCapturesMatching(command => typeof command === 'number');
+    }
+
+    _cancelCapturesMatching(matches) {
+        if (this._selector && matches(this._selector.command))
             this._cancelSelector();
-        if (this._windowSession && this._windowSession.command !== null)
+        if (this._windowSession && matches(this._windowSession.command))
             this._cancelWindowUi();
-        for (const cancel of run.pending) {
-            if (cancel.command !== null)
+        for (const cancel of this._run?.pending ?? []) {
+            if (matches(cancel.command))
                 cancel();
         }
     }
@@ -320,20 +344,8 @@ export default class ScreenshotUtilsExtension extends Extension {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
             return;
         }
-        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
+        if (this._requestBlocked(invocation))
             return;
-        }
-        if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
-            Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
-            return;
-        }
-        if (this._lockdownSettings.get_boolean('disable-save-to-disk')) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Saving screenshots is disabled by system policy');
-            return;
-        }
         const run = this._run;
         this._runCommand(mode, run, run.commandEpoch, approvalOnly).catch(error => {
             if (this._run === run)
@@ -341,6 +353,74 @@ export default class ScreenshotUtilsExtension extends Extension {
         });
         // Reply immediately; only Shell's own dialog can grant command consent.
         invocation.return_value(null);
+    }
+
+    _requestBlocked(invocation) {
+        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
+            return true;
+        }
+        if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
+            Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
+            return true;
+        }
+        if (this._lockdownSettings.get_boolean('disable-save-to-disk')) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Saving screenshots is disabled by system policy');
+            return true;
+        }
+        return false;
+    }
+
+    _requestNativeApproval(invocation) {
+        if (this._settings?.get_string('shortcut-setup') !== 'extension' || !this._shortcuts?.bindings.size) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Choose extension setup and assign an available shortcut first');
+            return;
+        }
+        if (this._requestBlocked(invocation))
+            return;
+        const run = this._run;
+        this._approveNativeShortcuts(run).catch(error => {
+            if (this._run === run)
+                this._notify(`Could not activate screenshot shortcuts: ${error.message}`);
+        });
+        invocation.return_value(null);
+    }
+
+    async _approveNativeShortcuts(run) {
+        this._busy = true;
+        const shortcuts = this._shortcuts;
+        const request = shortcuts.approvalRequest();
+        let dialog = null;
+        try {
+            await this._prepareCapture(run);
+            this._checkCaptureAllowed(run);
+            if (shortcuts !== this._shortcuts || request.epoch !== shortcuts.epoch)
+                throw new Error('Shortcut assignments changed');
+            dialog = new CommandConfirmation();
+            this._commandDialog = dialog;
+            const choice = new Promise(resolve => {
+                dialog.connect('destroy', () => resolve(false));
+                dialog.populate(null, allowed => {
+                    dialog.cancelled ||= !allowed;
+                    resolve(allowed);
+                }, false, request.shortcuts);
+            });
+            if (!dialog.open())
+                throw new Error('Could not grab shortcut approval input');
+            const allowed = await choice;
+            await this._wait(0, run);
+            this._checkCaptureAllowed(run);
+            if (allowed && !dialog.cancelled && shortcuts === this._shortcuts)
+                shortcuts.approve(request);
+        } finally {
+            if (this._commandDialog === dialog)
+                this._cancelCommandDialog();
+            if (this._run === run)
+                this._busy = false;
+        }
     }
 
     async _runCommand(mode, run, command, approvalOnly = false) {

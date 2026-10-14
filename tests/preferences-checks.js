@@ -246,6 +246,24 @@ export async function checkPreferences(preferences) {
         keyController.emit('key-pressed', Gdk.KEY_F11, 95, Gdk.ModifierType.CONTROL_MASK);
         keyController.emit('key-pressed', Gdk.KEY_Return, 36, 0);
         assert(settings.get_string('shortcut-selection') === '<Control>F11', 'Recorder did not save captured keys');
+        const activate = shortcutWidgets.find(widget => widget instanceof Gtk.Button &&
+            widget.label === 'Activate shortcuts for this session');
+        assert(activate?.sensitive, 'Assigned native shortcut has no activation control');
+        try {
+            let requested = false;
+            bus.call = (_destination, _path, _iface, method, _params, _type, _flags, _timeout, _cancellable, callback) => {
+                assert(method === 'ApproveNativeShortcuts', 'Native activation requested command access');
+                requested = true;
+                callback(bus, null);
+            };
+            bus.call_finish = () => new GLib.Variant('()', []);
+            activate.emit('clicked');
+            await waitUntil(() => activate.sensitive, 'Native activation request did not finish');
+            assert(requested, 'Native activation control did not contact Shell');
+        } finally {
+            bus.call = originalCall;
+            bus.call_finish = originalFinish;
+        }
         clearShortcut.emit('clicked');
         assert(settings.get_string('shortcut-selection') === '' && !clearShortcut.sensitive, 'Clear did not remove the shortcut');
         setShortcut.emit('clicked');

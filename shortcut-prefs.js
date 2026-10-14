@@ -80,12 +80,13 @@ function shortcutRecorder(parent, title, onSelected) {
 export function fillShortcutPreferences(window, page, settings, handlers) {
     let closed = false;
     let recorder = null;
+    let syncNativeApproval = () => {};
     const cancellable = new Gio.Cancellable();
     const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
     page.add(shortcuts);
     const setup = new Adw.ComboRow({title: 'Shortcut setup',
-        model: Gtk.StringList.new(['GNOME Keyboard Settings', 'Extension preferences']),
-        selected: settings.get_string('shortcut-setup') === 'extension' ? 1 : 0, use_subtitle: true});
+        model: Gtk.StringList.new(['GNOME settings', 'Extension']),
+        selected: settings.get_string('shortcut-setup') === 'extension' ? 1 : 0});
     shortcuts.add(setup);
     const commands = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     shortcuts.add(commands);
@@ -106,14 +107,15 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     let updatingAsk = false;
     let approvalProxy = null;
     let requestingApproval = false;
-    const requestApproval = async () => {
+    const requestApproval = async (method = 'ApproveSilentCommands') => {
         if (requestingApproval)
             return;
         requestingApproval = true;
         approve.sensitive = false;
+        syncNativeApproval();
         try {
             await callAsync(Gio.DBus.session, 'call', 'org.gnome.Shell', CAPTURE_BUS_PATH,
-                CAPTURE_BUS_INTERFACE, 'ApproveSilentCommands', null, null,
+                CAPTURE_BUS_INTERFACE, method, null, null,
                 Gio.DBusCallFlags.NONE, 5000, cancellable);
         } catch (error) {
             if (!closed && !cancellable.is_cancelled()) {
@@ -126,7 +128,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
                 syncAsk();
         }
     };
-    approve.connect('clicked', requestApproval);
+    approve.connect('clicked', () => requestApproval());
     askControl.connect('notify::active', () => {
         if (updatingAsk)
             return;
@@ -143,6 +145,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         const approved = approvalProxy?.get_cached_property('SilentCommandsApproved')?.get_boolean() ?? false;
         approve.label = approved ? 'Approved for this session' : 'Approve for this session';
         approve.sensitive = !approved && !requestingApproval;
+        syncNativeApproval();
     };
     for (const key of ['ask-command-confirmation', 'enable-shortcut-commands'])
         handlers.push([settings, settings.connect(`changed::${key}`, syncAsk)]);
@@ -207,7 +210,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
 
     const native = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     shortcuts.add(native);
-    native.append(new Gtk.Label({label: 'GNOME reserves these keys globally. Occupied combinations are rejected. Screenshot commands are disabled in this mode.',
+    native.append(new Gtk.Label({label: 'Assign keys, then activate them once in GNOME Shell. Keypresses capture immediately after approval. Changing assignments or disabling the extension resets approval. Screenshot commands are disabled in this mode.',
         xalign: 0, wrap: true}));
     const bindings = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list']});
     native.append(bindings);
@@ -239,10 +242,23 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         sync();
         bindings.append(row);
     }
+    const activate = new Gtk.Button({label: 'Activate shortcuts for this session', halign: Gtk.Align.END});
+    native.append(activate);
+    activate.connect('clicked', () => requestApproval('ApproveNativeShortcuts'));
+    syncNativeApproval = () => {
+        const approved = approvalProxy?.get_cached_property('NativeShortcutsApproved')?.get_boolean() ?? false;
+        activate.label = approved ? 'Shortcuts active for this session' : 'Activate shortcuts for this session';
+        activate.sensitive = !approved && !requestingApproval &&
+            CAPTURE_SHORTCUTS.some(({key}) => settings.get_string(key));
+    };
+    for (const {key} of CAPTURE_SHORTCUTS)
+        handlers.push([settings, settings.connect(`changed::${key}`, syncNativeApproval)]);
+    syncNativeApproval();
     setup.connect('notify::selected', () => settings.set_string('shortcut-setup', setup.selected === 1 ? 'extension' : 'gnome'));
     const syncSetup = () => {
         const extension = settings.get_string('shortcut-setup') === 'extension';
         setup.selected = extension ? 1 : 0;
+        setup.subtitle = extension ? 'Configure keys in these preferences' : 'Configure commands in GNOME Keyboard Settings';
         commands.visible = !extension;
         native.visible = extension;
         recorder?.close();

@@ -118,10 +118,10 @@ function requestCommand(method, parameters = null) {
         }));
 }
 
-function approvalStatus() {
+function approvalStatus(property = 'SilentCommandsApproved') {
     return new Promise((resolve, reject) => Gio.DBus.session.call(
         'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'org.freedesktop.DBus.Properties', 'Get',
-        new GLib.Variant('(ss)', ['dev.fxth.ScreenshotUtils', 'SilentCommandsApproved']),
+        new GLib.Variant('(ss)', ['dev.fxth.ScreenshotUtils', property]),
         null, Gio.DBusCallFlags.NONE, 5000, null, (connection, result) => {
             try {
                 resolve(connection.call_finish(result).get_child_value(0).get_variant().get_boolean());
@@ -715,6 +715,20 @@ export async function run() {
             await Scripting.sleep(30);
         };
         await pressShortcut(Clutter.KEY_F10);
+        assert(!directory.get_child('Native-screen.png').query_exists(null) && !await approvalStatus('NativeShortcutsApproved'),
+            'Caller-writable native bindings captured without Shell consent');
+        await requestCommand('ApproveNativeShortcuts');
+        await waitUntil(() => extension._commandDialog?.visible, 'Native activation approval did not open');
+        assert(extension._commandDialog.native, 'Native activation used the wrong consent dialog');
+        await preview('native-shortcut-approval.png');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Declined native activation did not finish');
+        assert(!await approvalStatus('NativeShortcutsApproved'), 'Declined native activation granted permission');
+        await requestCommand('ApproveNativeShortcuts');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Native activation did not finish');
+        assert(await approvalStatus('NativeShortcutsApproved'), 'Native activation status did not update');
+        await pressShortcut(Clutter.KEY_F10);
         await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
             'Native screen keypress did not capture');
         assert(!extension._commandDialog, 'Native keypress opened command confirmation');
@@ -730,6 +744,47 @@ export async function run() {
         await click(pointer, extension._windowSession.windows.keys().next().value);
         await waitUntil(() => !extension._windowSession && !extension._busy, 'Native window capture did not finish');
         checkPng(directory, 'Native-window.png');
+        settings.set_string('filename-template', 'Native-revoked-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => extension._busy && extension._run.pending.size > 0, 'Native delayed capture did not begin');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._busy, 'Native revocation did not cancel delayed capture');
+        assert(!directory.get_child('Native-revoked-screen.png').query_exists(null),
+            'Revoked native capture saved a delayed screenshot');
+        settings.set_int('capture-delay-ms', 0);
+        await requestCommand('ApproveNativeShortcuts');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Native picker reactivation did not finish');
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native revocation selector did not open');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._selector, 'Native revocation did not cancel selection');
+        assert(!directory.get_child('Native-revoked-area.png').query_exists(null),
+            'Revoked native selection saved a screenshot');
+        print('PASS: native consent revocation cancels pending captures and pickers');
+        settings.set_string('filename-template', 'Native-planted-{N}');
+        settings.set_string('shortcut-screen', '<Control>c');
+        assert(!await approvalStatus('NativeShortcutsApproved'), 'Changed native assignments retained approval');
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_c, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_c, Clutter.KeyState.RELEASED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
+        await Scripting.sleep(50);
+        assert(!directory.get_child('Native-planted-screen.png').query_exists(null),
+            'Planted common keypress bypassed native consent');
+        await requestCommand('ApproveNativeShortcuts');
+        await waitUntil(() => extension._commandDialog?.visible, 'Changed-key approval did not open');
+        const revokedNativeDialog = extension._commandDialog;
+        settings.set_string('shortcut-screen', originalScreenBinding);
+        await waitUntil(() => !extension._busy, 'Changed keys did not cancel pending native approval');
+        assert(revokedNativeDialog.destroyed && !await approvalStatus('NativeShortcutsApproved'),
+            'Native approval survived assignment changes while its dialog was open');
+        await requestCommand('ApproveNativeShortcuts');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Native reactivation did not finish');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        assert(!await approvalStatus('NativeShortcutsApproved'), 'Same-value notification retained native authorization');
         const nativeNames = [...extension._shortcuts.bindings.values()].map(binding => binding.name);
         extension.disable();
         assert(nativeNames.every(name => !(name in Main.wm._allowedKeybindings)), 'Native shortcut allowances leaked on disable');
@@ -738,6 +793,7 @@ export async function run() {
         global.display.ungrab_accelerator(freeProbe);
         extension.enable();
         assert(extension._shortcuts.bindings.size === 3, 'Native shortcuts did not restore after enable');
+        assert(!await approvalStatus('NativeShortcutsApproved'), 'Native authorization survived disable/re-enable');
         settings.set_string('shortcut-setup', 'gnome');
         assert(extension._shortcuts.bindings.size === 0 && settings.get_string('shortcut-screen') === originalScreenBinding,
             'Mode switch did not release keys and preserve configuration');

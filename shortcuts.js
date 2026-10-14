@@ -19,3 +19,11 @@ export function usableShortcut(accelerator) {
 export function captureCommand(mode) {
     return `gdbus call --session --dest org.gnome.Shell --object-path ${CAPTURE_BUS_PATH} --method ${CAPTURE_BUS_INTERFACE}.Capture ${mode}`;
 }
+
+export function displayShortcut(accelerator) {
+    const names = {control: 'Ctrl', ctrl: 'Ctrl', ctl: 'Ctrl', primary: 'Ctrl', mod1: 'Alt'};
+    const modifiers = [...accelerator.matchAll(/<([^>]+)>/g)].map(match =>
+        names[match[1].toLowerCase()] ?? match[1]);
+    const key = accelerator.replace(/<[^>]+>/g, '');
+    return [...new Set(modifiers), key.length === 1 ? key.toUpperCase() : key].join('+');
+}

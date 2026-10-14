@@ -1,7 +1,7 @@
 {
   "uuid": "screenshot-utils@fxth.dev",
   "name": "Screenshot Utils",
-  "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions. Optionally copies screenshot images to the clipboard; preferences can copy shortcut commands. Choose GNOME custom shortcuts or extension-managed shortcuts. Shortcut commands are disabled by default and require confirmation, or explicit GNOME Shell approval for silent access during this session.",
+  "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions. Optionally copies screenshot images to the clipboard; preferences can copy shortcut commands. Choose GNOME custom shortcuts or extension-managed shortcuts. Shortcut commands are disabled by default and require confirmation, or explicit GNOME Shell approval for silent access during this session. Extension-managed shortcuts also require session approval before activation.",
   "version-name": "2.2",
   "url": "https://github.com/fhaefele/screenshot-utils",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
