@@ -143,13 +143,17 @@ export async function checkPreferences(preferences) {
         const enableShortcuts = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
             widget.title === 'Enable keyboard shortcuts');
         const commandSwitch = Adw.SwitchRow ? enableShortcuts : descendants(enableShortcuts).find(widget => widget instanceof Gtk.Switch);
-        const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Shortcut source');
-        assert(!commandSwitch.active && !setup.visible && setup.selected === 0,
+        const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Source');
+        assert(!commandSwitch.active && !setup.visible && setup.selected === Gtk.INVALID_LIST_POSITION,
             'Disabled shortcuts showed or preselected a source');
         commandSwitch.active = true;
-        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === 0,
+        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === Gtk.INVALID_LIST_POSITION,
             'Master switch did not reveal explicit source selection');
-        setup.selected = 1;
+        assert(setup.model.get_n_items() === 2 &&
+            setup.model.get_string(0) === 'GNOME Keyboard Settings' && setup.model.get_string(1) === 'Extension',
+            'Source choices differ from the two supported modes');
+        const sourceExplanation = setup.subtitle;
+        setup.selected = 0;
         assert(settings.get_string('shortcut-setup') === 'gnome', 'GNOME source choice was not saved');
         const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
             widget.label.startsWith('Keyboard Settings →'));
@@ -243,7 +247,7 @@ export async function checkPreferences(preferences) {
             bus.call = originalCall;
             bus.call_finish = originalFinish;
         }
-        setup.selected = 2;
+        setup.selected = 1;
         assert(settings.get_string('shortcut-setup') === 'extension' && !instructions.get_parent().get_parent().visible,
             'Extension setup did not hide command instructions');
         const selectionShortcut = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow && widget.title === 'Selection shortcut');
@@ -274,8 +278,11 @@ export async function checkPreferences(preferences) {
         descendants(cancelledRecorder).find(widget => widget instanceof Gtk.Button && widget.label === 'Cancel').grab_focus();
         cancelledKeys.emit('key-pressed', Gdk.KEY_Return, 36, 0);
         assert(settings.get_string('shortcut-selection') === '', 'Keyboard Cancel saved a shortcut');
-        setup.selected = 1;
+        setup.selected = 0;
         assert(instructions.get_parent().get_parent().visible, 'GNOME setup did not restore command instructions');
+        assert(setup.subtitle === sourceExplanation &&
+            sourceExplanation === 'How do you want to manage your Keyboard shortcuts.',
+            'Source explanation changed when switching modes');
         settings.set_boolean('shortcuts-enabled', previousCommands);
         print('PASS: GTK master switch, source choice, persistent command approval and direct native key setup');
 

@@ -30,9 +30,9 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME settings** or **Extension managed**. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME Keyboard Settings** or **Extension**. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
 
-**GNOME settings** preserves existing custom shortcuts. Add a name, command and key in View and Customize Shortcuts → Custom Shortcuts. Preferences provides copy buttons and opens Keyboard Settings. Commands also work in a terminal:
+**GNOME Keyboard Settings** preserves existing custom shortcuts. Add a name, command and key in View and Customize Shortcuts → Custom Shortcuts. Preferences provides copy buttons and opens Keyboard Settings. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -42,7 +42,7 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 
 **Command permission** defaults to **Ask for every request**. **Allow without asking** requires one Shell confirmation and permits any local application to request screenshots without further prompts. Approval persists across logins, Shell restarts and locking. Turning shortcut access off, changing the source/permission, explicitly disabling the extension, or uninstalling it revokes approval. Use **Approve command access** when approval is required; **Keep asking** restores individual confirmation. Saved permissions follow the normal desktop-settings trust model: unrestricted programs running as you can modify them. The installation record is removed on uninstall; reinstalling or replacing the installation directory requires approval again. Notifications can be off without suppressing confirmation.
 
-**Extension managed** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
+**Extension** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
 
 Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME Keyboard Settings. Turning command access off cancels pending command captures.
 

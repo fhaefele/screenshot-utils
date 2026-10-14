@@ -90,9 +90,10 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     shortcuts.add(enabled);
     const status = new Gtk.Label({xalign: 0, wrap: true, css_classes: ['dim-label']});
     shortcuts.add(status);
-    const sources = ['', 'gnome', 'extension'];
-    const setup = new Adw.ComboRow({title: 'Shortcut source',
-        model: Gtk.StringList.new(['Choose source…', 'GNOME settings', 'Extension managed'])});
+    const sources = ['gnome', 'extension'];
+    const setup = new Adw.ComboRow({title: 'Source',
+        subtitle: 'How do you want to manage your Keyboard shortcuts.',
+        model: Gtk.StringList.new(['GNOME Keyboard Settings', 'Extension'])});
     shortcuts.add(setup);
     const commands = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
     shortcuts.add(commands);
@@ -130,8 +131,9 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     };
     approve.connect('clicked', requestApproval);
     setup.connect('notify::selected', () => {
-        if (!updating && settings.get_string('shortcut-setup') !== (sources[setup.selected] ?? ''))
-            settings.set_string('shortcut-setup', sources[setup.selected] ?? '');
+        const source = sources[setup.selected];
+        if (!updating && source && settings.get_string('shortcut-setup') !== source)
+            settings.set_string('shortcut-setup', source);
     });
     permission.connect('notify::selected', () => {
         if (updating)
@@ -231,12 +233,11 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         const available = approvalProxy?.get_cached_property('Available')?.get_boolean() ?? false;
         const approved = approvalProxy?.get_cached_property('SilentCommandsApproved')?.get_boolean() ?? false;
         updating = true;
-        setup.selected = Math.max(0, sources.indexOf(source));
+        const sourceIndex = sources.indexOf(source);
+        setup.selected = sourceIndex < 0 ? Gtk.INVALID_LIST_POSITION : sourceIndex;
         permission.selected = ask ? 0 : 1;
         updating = false;
         setup.visible = on;
-        setup.subtitle = source === 'extension' ? 'Assign keys in these preferences' : source === 'gnome'
-            ? 'Configure commands in GNOME Keyboard Settings' : 'Select where shortcuts are configured';
         commands.visible = on && source === 'gnome';
         native.visible = on && source === 'extension';
         disclosure.visible = !ask;
