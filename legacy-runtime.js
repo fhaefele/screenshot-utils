@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Gio from 'gi://Gio';
 
 // Used by Shell 42-44 builds; capture and preferences code stay shared.
@@ -6,12 +7,13 @@ export class Extension {
         this.metadata = extension.metadata ?? extension;
         this.uuid = this.metadata.uuid;
         this.path = extension.path;
-        this.dir = extension.dir ?? Gio.File.new_for_path(this.path);
+        this.dir = extension.dir;
     }
 
     getSettings() {
+        const directory = this.dir ?? Gio.File.new_for_path(this.path);
         const source = Gio.SettingsSchemaSource.new_from_directory(
-            this.dir.get_child('schemas').get_path(), Gio.SettingsSchemaSource.get_default(), false);
+            directory.get_child('schemas').get_path(), Gio.SettingsSchemaSource.get_default(), false);
         const schema = source.lookup(this.metadata['settings-schema'], true);
         if (!schema)
             throw new Error(`Settings schema missing for ${this.uuid}`);

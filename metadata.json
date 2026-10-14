@@ -1,11 +1,9 @@
 {
   "uuid": "screenshot-utils@fxth.dev",
   "name": "Screenshot Utils",
-  "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions.",
-  "version": 3,
+  "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions. Optionally copies screenshot images to the clipboard; preferences can copy shortcut commands. Shortcut commands are disabled by default. Each local application's screenshot request requires confirmation in GNOME Shell.",
   "version-name": "2.0",
   "url": "https://github.com/fhaefele/screenshot-utils",
-  "license": "GPL-3.0-or-later",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "settings-schema": "org.gnome.shell.extensions.screenshot-utils"
 }

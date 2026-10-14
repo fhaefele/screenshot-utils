@@ -1,7 +1,7 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import 'gi://Gtk?version=4.0';
 import GLib from 'gi://GLib';
-import Gtk from 'gi://Gtk?version=4.0';
 
 Gio.Resource.load('/usr/share/gnome-shell/org.gnome.Shell.Extensions.src.gresource')._register();
 imports.package.init({name: 'gnome-shell', prefix: '/usr', libdir: '/usr/lib'});

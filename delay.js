@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 export const DELAY_STEPS = [0, 100, 200, 500, 1000, 2000, 3000, 5000, 10000, 15000, 30000];
 
 export function delayToSlider(milliseconds) {

@@ -29,7 +29,7 @@ for (const target of ['legacy', 'modern']) {
     if (target === 'modern') {
         assert.equal(execFileSync('unzip', ['-Z1', archive], {encoding: 'utf8'})
             .split('\n').includes('schemas/gschemas.compiled'), false);
-        for (const file of ['delay.js', 'filename.js', 'location.js', 'prefs-compat.js', 'shell-compat.js'])
+        for (const file of ['delay.js', 'filename.js', 'location.js', 'prefs-compat.js', 'shell-compat.js', 'capture-selectors.js', 'async-utils.js'])
             assert.equal(contents(file), readFileSync(file, 'utf8'));
     }
 }

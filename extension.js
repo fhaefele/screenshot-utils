@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -11,10 +12,12 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import {SelectArea, Tooltip} from 'resource:///org/gnome/shell/ui/screenshot.js';
+import {Tooltip} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 import {buildFilename} from './filename.js';
-import {connectWindowClosed, createNotificationSource, createSecondaryClickBin, showNotification} from './shell-compat.js';
+import {createNotificationSource, createSecondaryClickBin, showNotification} from './shell-compat.js';
+import {AreaSelector, CommandConfirmation, WindowPicker} from './capture-selectors.js';
+import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 
@@ -27,14 +30,6 @@ const CAPTURE_INTERFACE = `<node>
         </method>
     </interface>
 </node>`;
-
-for (const method of ['screenshot', 'screenshot_window', 'screenshot_area', 'screenshot_stage_to_content'])
-    Gio._promisify(Shell.Screenshot.prototype, method);
-Gio._promisify(Shell.Screenshot, 'composite_to_stream');
-Gio._promisify(Gio.File.prototype, 'create_async', 'create_finish');
-Gio._promisify(Gio.File.prototype, 'delete_async', 'delete_finish');
-Gio._promisify(Gio.OutputStream.prototype, 'write_bytes_async', 'write_bytes_finish');
-Gio._promisify(Gio.OutputStream.prototype, 'close_async', 'close_finish');
 
 const MenuTooltip = GObject.registerClass(
 class MenuTooltip extends Tooltip {
@@ -54,6 +49,8 @@ const CaptureButton = GObject.registerClass(
 class CaptureButton extends PanelMenu.Button {
     _init(extension) {
         super._init(0.0, 'Screenshot Utils');
+        // Retain the actor before populating it so failed enable can clean up.
+        extension._button = this;
         this._extension = extension;
         this.add_child(new St.Icon({icon_name: 'camera-photo-symbolic', style_class: 'system-status-icon'}));
 
@@ -179,12 +176,36 @@ class CaptureButton extends PanelMenu.Button {
 
 export default class ScreenshotUtilsExtension extends Extension {
     enable() {
+        try {
+            this._enable();
+        } catch (error) {
+            this.disable();
+            throw error;
+        }
+    }
+
+    _enable() {
         this._settings = this.getSettings();
         this._lockdownSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.lockdown'});
         ensureSaveLocation(this._settings);
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
-        this._run = {cancellable: new Gio.Cancellable(), pending: new Set()};
+        this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
+        this._commandDialog = null;
+        this._commandPermissionChangedId = this._settings.connect('changed::enable-shortcut-commands', () => {
+            // External false→true changes may be queued together. The current
+            // value cannot prove that an approved request stayed authorized.
+            this._run.commandEpoch++;
+            this._cancelCommandDialog();
+            if (this._selector && this._selector.command !== null)
+                this._cancelSelector();
+            if (this._windowSession && this._windowSession.command !== null)
+                this._cancelWindowUi();
+            for (const cancel of this._run.pending) {
+                if (cancel.command !== null)
+                    cancel();
+            }
+        });
         this._busy = false;
         this._selector = null;
         this._windowSession = null;
@@ -207,6 +228,7 @@ export default class ScreenshotUtilsExtension extends Extension {
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
+        this._cancelCommandDialog();
         this._cancelSelector();
         this._cancelWindowUi();
         this._notificationSource?.destroy();
@@ -218,10 +240,15 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._injectionManager = null;
         this._button?.destroy();
         this._button = null;
-        this._settings?.disconnect(this._locationChangedId);
+        if (this._locationChangedId)
+            this._settings.disconnect(this._locationChangedId);
+        if (this._commandPermissionChangedId)
+            this._settings.disconnect(this._commandPermissionChangedId);
+        this._commandPermissionChangedId = 0;
         this._locationChangedId = 0;
         this._settings = null;
         this._lockdownSettings = null;
+        this._busy = false;
     }
 
     _checkActive(run) {
@@ -229,20 +256,33 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Capture cancelled');
     }
 
-    _checkCaptureAllowed(run) {
+    _checkCommandAllowed(run, command) {
         this._checkActive(run);
+        if (command !== null && (command !== run.commandEpoch ||
+            !this._settings.get_boolean('enable-shortcut-commands')))
+            throw new Error('Screenshot command permission was revoked');
+    }
+
+    _checkCaptureAllowed(run, command = null) {
+        this._checkCommandAllowed(run, command);
+        if (Main.sessionMode.isLocked || Main.sessionMode.isGreeter)
+            throw new Error('Screenshot controls are unavailable');
         if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
             throw new Error('Saving screenshots is disabled by system policy');
     }
 
     _requestCapture(mode, invocation) {
-        const actions = {
-            selection: () => this._selectArea(),
-            screen: () => this._capture('screen'),
-            window: () => this._openWindowUi(),
-        };
-        if (!Object.prototype.hasOwnProperty.call(actions, mode)) {
+        if (!this._settings?.get_boolean('enable-shortcut-commands')) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Enable Allow shortcut commands in Screenshot Utils preferences first');
+            return;
+        }
+        if (!['selection', 'screen', 'window'].includes(mode)) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
+            return;
+        }
+        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
             return;
         }
         if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
@@ -255,20 +295,60 @@ export default class ScreenshotUtilsExtension extends Extension {
                 'Saving screenshots is disabled by system policy');
             return;
         }
-        if (this._busy || this._selector || this._windowSession) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
-            return;
-        }
         const run = this._run;
-        actions[mode]().catch(error => {
+        this._runCommand(mode, run, run.commandEpoch).catch(error => {
             if (this._run === run)
                 this._notify(`Screenshot failed: ${error.message}`);
         });
-        // The shortcut command exits immediately; the picker/delay continues in Shell.
+        // Reply immediately; Shell requires a user gesture for each command.
         invocation.return_value(null);
     }
 
-    _wait(milliseconds, run, object = null, signal = null, isReady = null) {
+    async _runCommand(mode, run, command) {
+        this._busy = true;
+        let allowed;
+        let dialog = null;
+        try {
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
+            dialog = new CommandConfirmation();
+            this._commandDialog = dialog;
+            const choice = new Promise(resolve => {
+                dialog.connect('destroy', () => resolve(false));
+                dialog.populate(mode, choice => {
+                    dialog.cancelled ||= !choice;
+                    resolve(choice);
+                });
+            });
+            if (!dialog.open())
+                throw new Error('Could not grab screenshot confirmation input');
+            allowed = await choice;
+            await this._wait(0, run, null, null, null, command);
+            this._checkCaptureAllowed(run, command);
+            allowed &&= !dialog.cancelled;
+        } finally {
+            if (this._commandDialog === dialog)
+                this._cancelCommandDialog();
+            if (this._run === run)
+                this._busy = false;
+        }
+        if (!allowed)
+            return;
+        if (mode === 'selection')
+            await this._selectArea(command);
+        else if (mode === 'window')
+            await this._openWindowUi(command);
+        else
+            await this._capture('screen', null, null, command);
+    }
+
+    _cancelCommandDialog() {
+        const dialog = this._commandDialog;
+        this._commandDialog = null;
+        dialog?.cancel();
+    }
+
+    _wait(milliseconds, run, object = null, signal = null, isReady = null, command = null) {
         return new Promise((resolve, reject) => {
             this._checkActive(run);
             let timeoutId = 0;
@@ -286,6 +366,7 @@ export default class ScreenshotUtilsExtension extends Extension {
                     resolve();
             };
             const cancel = () => finish(new Error('Capture cancelled'));
+            cancel.command = command;
             run.pending.add(cancel);
             timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, milliseconds, () => {
                 timeoutId = 0;
@@ -303,13 +384,13 @@ export default class ScreenshotUtilsExtension extends Extension {
         });
     }
 
-    async _prepareCapture(run) {
-        this._checkActive(run);
+    async _prepareCapture(run, command = null) {
+        this._checkCommandAllowed(run, command);
         // PopupMenu changed close() parameters in Shell 51.
         this._button.menu.close(SHELL_MAJOR >= 51
             ? {animate: false} : 0);
-        await this._wait(0, run);
-        this._checkActive(run);
+        await this._wait(0, run, null, null, null, command);
+        this._checkCommandAllowed(run, command);
     }
 
     _patchScreenshotSound() {
@@ -343,52 +424,51 @@ export default class ScreenshotUtilsExtension extends Extension {
     }
 
     _cancelSelector() {
-        if (!this._selector)
-            return;
-        // selectAsync() owns destruction; ungrab settles its promise and restores input.
-        this._selector._grabHelper.ungrab();
-        this._selector.hide();
+        const selector = this._selector;
+        this._selector = null;
+        selector?.cancel();
     }
 
-    async _selectArea() {
-        if (!this._run || this._selector || this._busy || this._windowSession)
+    async _selectArea(command = null) {
+        if (!this._run || this._selector || this._busy || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
-        const selector = new SelectArea();
-        let cancelled = false;
-        const hint = createSecondaryClickBin({
-            accessible_name: 'Right-click to cancel selection',
-        }, async () => {
-            cancelled = true;
-            try {
-                await this._wait(0, run);
-                if (this._selector === selector)
-                    this._cancelSelector();
-            } catch {
-                // Disabling already cancels the selector.
-            }
-        });
-        let hintDestroyed = false;
-        hint.connect('destroy', () => { hintDestroyed = true; });
-        hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
-        hint.set_child(new St.Label({
-            text: 'Esc or right-click to cancel',
-            style_class: 'screenshot-ui-tooltip',
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.END,
-            x_expand: true,
-            y_expand: true,
-            translation_y: -24,
-        }));
-        selector.add_child(hint);
+        const selector = new AreaSelector();
+        selector.command = command;
         this._selector = selector;
-        let selecting = false;
+        let cancelled = false;
         let rect;
         try {
-            await this._prepareCapture(run);
-            selecting = true;
+            const hint = createSecondaryClickBin({
+                accessible_name: 'Right-click to cancel selection',
+            }, async () => {
+                cancelled = true;
+                try {
+                    await this._wait(0, run);
+                    if (this._selector === selector)
+                        this._cancelSelector();
+                } catch {
+                    // Disabling already cancels the selector.
+                }
+            });
+            selector.add_child(hint);
+            hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
+            hint.set_child(new St.Label({
+                text: 'Esc or right-click to cancel',
+                style_class: 'screenshot-ui-tooltip',
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.END,
+                x_expand: true,
+                y_expand: true,
+                translation_y: -24,
+            }));
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
             rect = await selector.selectAsync();
-            this._checkActive(run);
+            // Finish native input dispatch before destroying the selection actor.
+            // Unlike SelectArea's idle, this source is cancelled on disable.
+            await this._wait(0, run);
+            this._checkCaptureAllowed(run, command);
             // Native geometry can use its initial coordinates when no drag occurred.
             if (cancelled || !selector._rubberband.visible)
                 rect = null;
@@ -396,17 +476,12 @@ export default class ScreenshotUtilsExtension extends Extension {
             if (this._run === run)
                 this._notify(`Region selection failed: ${error.message}`);
         } finally {
-            if (!hintDestroyed) {
-                hint.get_parent()?.remove_child(hint);
-                hint.destroy();
-            }
             if (this._selector === selector)
                 this._selector = null;
-            if (!selecting)
-                selector.destroy();
+            selector.cancel();
         }
         if (this._run === run && rect?.width > 1 && rect.height > 1)
-            await this._capture('area', rect);
+            await this._capture('area', rect, null, command);
     }
 
     async _openPreferences() {
@@ -427,171 +502,75 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    _releaseWindowSession(session) {
-        session.manager.clear();
-        for (const [object, id] of session.signals)
-            object.disconnect(id);
-        session.signals = [];
-        for (const wrapper of session.cancelWrappers ?? []) {
-            if (wrapper.destroyed)
-                continue;
-            wrapper.button.set_child(null);
-            wrapper.parent.insert_child_at_index(wrapper.selector, wrapper.index);
-            wrapper.button.destroy();
-        }
-        session.cancelWrappers = [];
-        if (session.controls) {
-            const {panelVisible, constraints, properties} = session.controls;
-            session.ui._panel.visible = panelVisible;
-            session.ui._closeButton.set(properties);
-            for (const constraint of constraints)
-                session.ui._closeButton.add_constraint(constraint);
-            session.controls = null;
-        }
-        if (session.closedId)
-            session.ui.disconnect(session.closedId);
-        session.closedId = 0;
-        if (this._windowSession === session)
-            this._windowSession = null;
-    }
-
-    async _chooseWindow(session, window, run) {
-        if (this._windowSession !== session || this._run !== run || session.selected || session.cancelled || !window)
+    async _chooseWindow(picker, window, run, command = null) {
+        if (this._windowSession !== picker || this._run !== run || picker.selected || picker.cancelled)
             return;
-        session.selected = window;
+        picker.selected = window;
         try {
-            // Finish the thumbnail's input event before close() destroys it.
-            await this._wait(0, run);
-            if (this._windowSession === session)
-                session.ui.close(true);
-        } catch {
-            // Disabling the extension cancels the pending selection.
+            // Finish the button event before destroying its actor.
+            await this._wait(0, run, null, null, null, command);
+            if (this._windowSession !== picker || picker.cancelled)
+                return;
+            this._cancelWindowUi();
+            await this._capture('window', null, window, command);
+        } catch (error) {
+            if (this._run === run)
+                this._notify(`Window selection failed: ${error.message}`);
         }
     }
 
-    async _cancelWindowSelection(session, run) {
-        session.cancelled = true;
-        session.selected = null;
+    async _cancelWindowSelection(picker, run) {
+        if (this._windowSession !== picker)
+            return;
+        picker.cancelled = true;
+        picker.selected = null;
         try {
             await this._wait(0, run);
-            if (this._windowSession === session)
-                session.ui.close(true);
+            if (this._windowSession === picker)
+                this._cancelWindowUi();
         } catch {
-            // Disabling already closes the picker.
+            // Disabling already destroys the picker.
         }
     }
 
     _cancelWindowUi() {
-        const session = this._windowSession;
-        if (!session)
-            return;
-        this._releaseWindowSession(session);
-        // open() still owns its frozen actors until its snapshot await finishes.
-        if (!session.ui._openingCoroutineInProgress)
-            session.ui.close(true);
+        const picker = this._windowSession;
+        this._windowSession = null;
+        picker?.cancel();
     }
 
-    async _openWindowUi() {
-        if (!this._run || this._busy || this._selector || this._windowSession)
+    async _openWindowUi(command = null) {
+        if (!this._run || this._busy || this._selector || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
         this._busy = true;
-        let session = null;
+        let picker = null;
         try {
-            await this._prepareCapture(run);
+            await this._prepareCapture(run, command);
+            this._checkCaptureAllowed(run, command);
             const ui = Main.screenshotUI;
             if (ui.visible || ui._openingCoroutineInProgress || ui._screencastInProgress)
                 throw new Error('GNOME screenshot UI is already in use');
             const workspace = global.workspace_manager.get_active_workspace();
-            const windows = global.get_window_actors().map(actor => actor.meta_window)
-                .filter(window => !window.is_override_redirect() && window.located_on_workspace(workspace));
-            session = {ui, manager: new InjectionManager(), windows: new Map(), selected: null, closedId: 0, signals: []};
-            this._windowSession = session;
-            session.manager.overrideMethod(ui, '_onCaptureButtonClicked', () => async () => {
-                const selected = ui._windowSelectors.flatMap(selector => selector.windows())
-                    .find(window => window.checked);
-                await this._chooseWindow(session, session.windows.get(selected), run);
-            });
-            session.closedId = connectWindowClosed(ui, () => {
-                const selected = session.selected;
-                this._releaseWindowSession(session);
-                if (this._run === run && selected)
-                    this._capture('window', null, selected);
-            });
-            // Native capture() creates thumbnails synchronously in window-actor order.
-            // Map them before awaiting open(), while the window list cannot change.
-            const opening = ui.open();
-            let mappingError = null;
-            for (const selector of ui._windowSelectors) {
-                const originals = windows.filter(window => window.get_monitor() === selector._monitorIndex);
-                const thumbnails = selector.windows();
-                if (originals.length !== thumbnails.length) {
-                    mappingError = new Error('GNOME window selector changed; cannot identify the selected window');
-                    break;
-                }
-                thumbnails.forEach((thumbnail, index) => session.windows.set(thumbnail, originals[index]));
-            }
-            await opening;
-            this._checkActive(run);
-            if (mappingError)
-                throw mappingError;
-            if (!ui.visible || !ui._windowButton.reactive)
+            const windows = global.get_window_actors()
+                .filter(actor => actor.width > 0 && actor.height > 0)
+                .map(actor => actor.meta_window)
+                .filter(window => !window.is_override_redirect() && !window.skip_taskbar &&
+                    window.located_on_workspace(workspace));
+            if (!windows.length)
                 throw new Error('No windows available to capture');
-            ui._showPointerButton.checked = this._settings.get_boolean('include-cursor');
-            ui._windowButton.checked = true;
-            session.cancelWrappers = [];
-            for (const selector of ui._windowSelectors) {
-                const parent = selector.get_parent();
-                const index = parent.get_children().indexOf(selector);
-                parent.remove_child(selector);
-                const button = createSecondaryClickBin({child: selector,
-                    x_expand: true, y_expand: true, accessible_name: 'Right-click to cancel window selection'},
-                () => this._cancelWindowSelection(session, run));
-                const wrapper = {selector, parent, index, button, destroyed: false};
-                button.connect('destroy', () => { wrapper.destroyed = true; });
-                parent.insert_child_at_index(button, index);
-                session.cancelWrappers.push(wrapper);
-            }
-            // Keep native keyboard shortcuts from switching this window-only picker.
-            for (const button of [ui._selectionButton, ui._screenButton, ui._castButton]) {
-                const id = button.connect('notify::checked', () => {
-                    if (!button.checked)
-                        return;
-                    ui._shotButton.checked = true;
-                    ui._windowButton.checked = true;
-                });
-                session.signals.push([button, id]);
-            }
-            const close = ui._closeButton;
-            session.controls = {
-                panelVisible: ui._panel.visible,
-                constraints: close.get_constraints(),
-                properties: {
-                    x_align: close.x_align, y_align: close.y_align,
-                    x_expand: close.x_expand, y_expand: close.y_expand,
-                    translation_y: close.translation_y,
-                    button_mask: close.button_mask,
-                },
-            };
-            ui._panel.hide();
-            close.clear_constraints();
-            close.set({x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.END,
-                x_expand: true, y_expand: true, translation_y: -24,
-                button_mask: close.button_mask | St.ButtonMask.THREE});
-            for (const [thumbnail, window] of session.windows) {
-                thumbnail.button_mask |= St.ButtonMask.THREE;
-                thumbnail.connect('clicked', (_thumbnail, button) => {
-                    if (button === Clutter.BUTTON_SECONDARY)
-                        this._cancelWindowSelection(session, run);
-                    else
-                        this._chooseWindow(session, window, run);
-                });
-            }
+            picker = new WindowPicker();
+            picker.command = command;
+            this._windowSession = picker;
+            picker.populate(windows,
+                window => this._chooseWindow(picker, window, run, command),
+                () => this._cancelWindowSelection(picker, run));
+            if (!picker.open())
+                throw new Error('Could not grab window selection input');
         } catch (error) {
-            if (session) {
-                this._releaseWindowSession(session);
-                session.ui.close(true);
-            }
+            if (this._windowSession === picker)
+                this._windowSession = null;
+            picker?.cancel();
             if (this._run === run)
                 this._notify(`Window selection failed: ${error.message}`);
         } finally {
@@ -600,89 +579,89 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    async _focusWindow(window, run) {
+    async _focusWindow(window, run, command) {
         window.activate(global.get_current_time());
         await this._wait(2000, run, global.display, 'notify::focus-window',
-            () => global.display.get_focus_window() === window);
-        this._checkActive(run);
+            () => global.display.get_focus_window() === window, command);
+        this._checkCaptureAllowed(run, command);
     }
 
-    async _capture(kind, rect = null, selectedWindow = null) {
-        if (!this._run || this._busy || this._selector || this._windowSession)
+    async _capture(kind, rect = null, selectedWindow = null, command = null) {
+        if (!this._run || this._busy || this._selector || this._windowSession || this._commandDialog)
             return;
         const run = this._run;
         const settings = this._settings;
         this._busy = true;
         let countdown = null;
         try {
-            this._checkCaptureAllowed(run);
-            await this._prepareCapture(run);
+            this._checkCaptureAllowed(run, command);
+            await this._prepareCapture(run, command);
             const delay = settings.get_int('capture-delay-ms');
             if (delay > 0) {
                 if (delay >= 1000)
                     countdown = this._notify(`Capturing in ${formatDelay(delay)}…`);
                 countdown?.connect('destroy', () => { countdown = null; });
-                await this._wait(delay, run);
+                await this._wait(delay, run, null, null, null, command);
                 if (countdown) {
                     countdown.destroy();
-                    await this._wait(MessageTray.ANIMATION_TIME, run);
+                    await this._wait(MessageTray.ANIMATION_TIME, run, null, null, null, command);
                 }
             }
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const screenshot = new Shell.Screenshot();
             const stream = Gio.MemoryOutputStream.new_resizable();
             try {
                 if (kind === 'screen') {
-                    await screenshot.screenshot(settings.get_boolean('include-cursor'), stream);
+                    await callAsync(screenshot, 'screenshot', settings.get_boolean('include-cursor'), stream);
                 } else if (kind === 'window') {
                     if (!selectedWindow)
                         throw new Error('Choose a window to capture');
-                    await this._focusWindow(selectedWindow, run);
-                    await screenshot.screenshot_window(
+                    await this._focusWindow(selectedWindow, run, command);
+                    await callAsync(screenshot, 'screenshot_window',
                         true,
                         settings.get_boolean('include-cursor'), stream);
                 } else {
                     if (settings.get_boolean('include-cursor')) {
-                        const [content, scale, cursor, point, cursorScale] = await screenshot.screenshot_stage_to_content();
-                        this._checkActive(run);
+                        const [content, scale, cursor, point, cursorScale] = await callAsync(screenshot, 'screenshot_stage_to_content');
+                        this._checkCaptureAllowed(run, command);
                         const texture = content.get_texture();
                         const x = Math.round(rect.x * scale);
                         const y = Math.round(rect.y * scale);
                         // Round edges together so fractional scaling cannot overrun the texture.
                         const width = Math.min(texture.get_width(), Math.round((rect.x + rect.width) * scale)) - x;
                         const height = Math.min(texture.get_height(), Math.round((rect.y + rect.height) * scale)) - y;
-                        await Shell.Screenshot.composite_to_stream(
+                        await callAsync(Shell.Screenshot, 'composite_to_stream',
                             texture, x, y, width, height, scale,
                             cursor?.get_texture() ?? null,
                             Math.round(point.x * scale), Math.round(point.y * scale), cursorScale, stream);
                     } else {
-                        await screenshot.screenshot_area(rect.x, rect.y, rect.width, rect.height, stream);
+                        await callAsync(screenshot, 'screenshot_area', rect.x, rect.y, rect.width, rect.height, stream);
                     }
                 }
             } finally {
                 stream.close(null);
             }
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const bytes = stream.steal_as_bytes();
             if (bytes.get_size() === 0)
                 throw new Error('GNOME returned an empty screenshot');
             const directory = this._getSaveDirectory(settings);
             await ensureDirectory(directory, run.cancellable);
             const {file, stream: output} = await this._createUniqueFile(
-                directory, settings.get_string('filename-template'), kind, run);
+                directory, settings.get_string('filename-template'), kind, run, command);
             try {
-                this._checkCaptureAllowed(run);
-                await this._writeBytes(output, bytes, run);
-                await output.close_async(GLib.PRIORITY_DEFAULT, run.cancellable);
-                this._checkCaptureAllowed(run);
+                this._checkCaptureAllowed(run, command);
+                await this._writeBytes(output, bytes, run, command);
+                await callAsync(output, 'close_async', GLib.PRIORITY_DEFAULT, run.cancellable);
+                this._checkCaptureAllowed(run, command);
             } catch (error) {
                 try {
-                    await output.close_async(GLib.PRIORITY_DEFAULT, null);
+                    await callAsync(output, 'close_async', GLib.PRIORITY_DEFAULT, null);
                 } catch (cleanupError) {
                     console.error(`Could not close screenshot file: ${cleanupError.message}`);
                 }
                 try {
-                    await file.delete_async(GLib.PRIORITY_DEFAULT, null);
+                    await callAsync(file, 'delete_async', GLib.PRIORITY_DEFAULT, null);
                 } catch (cleanupError) {
                     console.error(`Could not remove incomplete screenshot: ${cleanupError.message}`);
                 }
@@ -712,13 +691,13 @@ export default class ScreenshotUtilsExtension extends Extension {
         }
     }
 
-    async _writeBytes(output, bytes, run) {
+    async _writeBytes(output, bytes, run, command = null) {
         const size = bytes.get_size();
         for (let offset = 0; offset < size;) {
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             // GBytes keeps the buffer alive throughout asynchronous writes.
             const remaining = offset ? GLib.Bytes.new_from_bytes(bytes, offset, size - offset) : bytes;
-            const written = await output.write_bytes_async(remaining, GLib.PRIORITY_DEFAULT, run.cancellable);
+            const written = await callAsync(output, 'write_bytes_async', remaining, GLib.PRIORITY_DEFAULT, run.cancellable);
             if (written <= 0)
                 throw new Error('Screenshot write made no progress');
             offset += written;
@@ -729,14 +708,14 @@ export default class ScreenshotUtilsExtension extends Extension {
         return Gio.File.new_for_path(getSavePath(settings));
     }
 
-    async _createUniqueFile(directory, template, kind, run) {
+    async _createUniqueFile(directory, template, kind, run, command = null) {
         const now = new Date();
         for (let index = 0; index < 1000; index++) {
-            this._checkCaptureAllowed(run);
+            this._checkCaptureAllowed(run, command);
             const suffix = index ? `-${index + 1}` : '';
             const file = directory.get_child(buildFilename(template, now, kind, suffix));
             try {
-                const stream = await file.create_async(Gio.FileCreateFlags.PRIVATE, GLib.PRIORITY_DEFAULT, run.cancellable);
+                const stream = await callAsync(file, 'create_async', Gio.FileCreateFlags.PRIVATE, GLib.PRIORITY_DEFAULT, run.cancellable);
                 return {file, stream};
             } catch (error) {
                 if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))

@@ -32,12 +32,13 @@ export async function checkPreferences(preferences) {
     const previousFolder = settings.get_string('save-location');
     const previousTemplate = settings.get_string('filename-template');
     const previousDelay = settings.get_int('capture-delay-ms');
+    const previousCommands = settings.get_boolean('enable-shortcut-commands');
     const window = new Adw.PreferencesWindow();
 
     try {
         preferences.fillPreferencesWindow(window);
         const widgets = descendants(window);
-        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 4,
+        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 5,
             'Preferences contain an obsolete capture switch');
         const folder = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Screenshot folder');
         const template = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Filename template');
@@ -77,6 +78,14 @@ export async function checkPreferences(preferences) {
             widget.title === 'Keyboard Shortcuts');
         assert(shortcuts, 'Keyboard shortcut instructions are missing');
         const shortcutWidgets = descendants(shortcuts);
+        const allowCommands = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
+            widget.title === 'Allow shortcut commands');
+        assert(allowCommands && allowCommands.subtitle.includes('local applications'),
+            'Shortcut permission has no disclosure');
+        const commandSwitch = Adw.SwitchRow ? allowCommands : descendants(allowCommands).find(widget => widget instanceof Gtk.Switch);
+        commandSwitch.active = !previousCommands;
+        assert(settings.get_boolean('enable-shortcut-commands') === !previousCommands, 'Shortcut permission was not saved');
+        commandSwitch.active = previousCommands;
         const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
             widget.label.startsWith('Keyboard Settings →'));
         assert(instructions && !instructions.has_css_class('caption') && !instructions.has_css_class('dim-label'),
@@ -151,6 +160,7 @@ export async function checkPreferences(preferences) {
         settings.set_string('save-location', previousFolder);
         settings.set_string('filename-template', previousTemplate);
         settings.set_int('capture-delay-ms', previousDelay);
+        settings.set_boolean('enable-shortcut-commands', previousCommands);
         window.close();
     }
 

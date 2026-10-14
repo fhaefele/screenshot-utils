@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 const sources = ['extension.js', 'prefs.js', 'filename.js', 'location.js', 'delay.js',
-    'shell-compat.js', 'prefs-compat.js'];
+    'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js'];
 
 // esbuild bundles shared local modules. Only GJS's native imports stay external.
 const legacyRequire = `function require(specifier) {
@@ -23,7 +23,7 @@ export async function bundleLegacy(entry, outfile, globalName, {preamble = '', f
         absWorkingDir: root, entryPoints: [entry], outfile, bundle: true,
         format: 'iife', globalName, target: 'firefox91', charset: 'utf8',
         external: ['resource://*'],
-        banner: {js: `${preamble}\n${legacyRequire}`}, footer: {js: footer},
+        banner: {js: `// SPDX-License-Identifier: GPL-3.0-or-later\n${preamble}\n${legacyRequire}`}, footer: {js: footer},
         plugins: [{name: 'legacy-gjs', setup(builder) {
             // GI namespaces cannot be enumerated by CommonJS interop helpers.
             builder.onResolve({filter: /^gi:\/\//}, args => ({path: args.path, namespace: 'legacy-gi'}));
