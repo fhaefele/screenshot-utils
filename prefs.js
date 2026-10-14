@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
@@ -10,10 +11,10 @@ import {formatDelay, parseDelaySeconds} from './delay.js';
 
 Gio.Resource.load(`${PKGDATADIR}/gnome-shell-icons.gresource`)._register();
 
-function commitOnLeave(row, apply) {
-    row.connect('apply', apply);
+function commitOnLeave(row, apply, handlers) {
+    handlers.push([row, row.connect('apply', apply)]);
     const focus = new Gtk.EventControllerFocus();
-    focus.connect('leave', apply);
+    handlers.push([focus, focus.connect('leave', apply)]);
     row.add_controller(focus);
     return focus;
 }
@@ -21,6 +22,7 @@ function commitOnLeave(row, apply) {
 export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        const handlers = [];
         ensureSaveLocation(settings);
         const page = new Adw.PreferencesPage({title: 'Capture', icon_name: 'camera-photo-symbolic'});
         const files = new Adw.PreferencesGroup({title: 'Files'});
@@ -34,16 +36,19 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
                 settings.set_string('save-location', value);
             folder.set_text(ensureSaveLocation(settings));
         };
-        commitOnLeave(folder, applyFolder);
+        commitOnLeave(folder, applyFolder, handlers);
         const locationChangedId = settings.connect('changed::save-location',
             () => folder.set_text(ensureSaveLocation(settings)));
-        const handlers = [locationChangedId];
+        handlers.push([settings, locationChangedId]);
         const applyEntries = [applyFolder];
         window.connect('close-request', () => {
             for (const apply of applyEntries)
                 apply();
-            for (const id of handlers)
-                settings.disconnect(id);
+            // Focus controllers can emit leave during GTK disposal. Disconnect
+            // before destruction so GJS never calls into collected closures.
+            for (const [object, id] of handlers)
+                object.disconnect(id);
+            handlers.length = 0;
             return false;
         });
         files.add(folder);
@@ -84,10 +89,10 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
             else
                 delay.remove_css_class('error');
         });
-        const delayFocus = commitOnLeave(delay, applyDelay);
-        delayFocus.connect('enter', syncDelay);
+        const delayFocus = commitOnLeave(delay, applyDelay, handlers);
+        handlers.push([delayFocus, delayFocus.connect('enter', syncDelay)]);
         applyEntries.push(applyDelay);
-        handlers.push(settings.connect('changed::capture-delay-ms', syncDelay));
+        handlers.push([settings, settings.connect('changed::capture-delay-ms', syncDelay)]);
         syncDelay();
         capture.add(delay);
 
@@ -103,6 +108,9 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
 
         const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard Shortcuts'});
         page.add(shortcuts);
+        const allowCommands = createSwitchRow(settings, 'enable-shortcut-commands', 'Allow shortcut commands');
+        allowCommands.subtitle = 'Allows local applications to request screenshots, even when notifications are off.';
+        shortcuts.add(allowCommands);
         const shortcutContent = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
         shortcuts.add(shortcutContent);
         shortcutContent.append(new Gtk.Label({

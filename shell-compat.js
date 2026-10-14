@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Clutter from 'gi://Clutter';
-import GObject from 'gi://GObject';
 import St from 'gi://St';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
-
-export function connectWindowClosed(ui, callback) {
-    if (GObject.signal_lookup('closed', ui.constructor.$gtype))
-        return ui.connect('closed', callback);
-    return ui.connect('notify::visible', () => {
-        if (!ui.visible)
-            callback();
-    });
-}
 
 export function createNotificationSource() {
     return MessageTray.Source.prototype.addNotification
@@ -33,8 +24,13 @@ export function showNotification(source, title, body, openFolder) {
 export function createSecondaryClickBin(properties, onClick) {
     // A Button's click gesture can claim primary releases even with a secondary-only mask.
     const bin = new St.Bin({reactive: true, can_focus: false, ...properties});
+    connectSecondaryClick(bin, onClick);
+    return bin;
+}
+
+export function connectSecondaryClick(actor, onClick) {
     // Capture both phases before descendants can start a native drag or selection.
-    bin.connect('captured-event', (_bin, event) => {
+    actor.connect('captured-event', (_actor, event) => {
         const type = event.type();
         if ((type !== Clutter.EventType.BUTTON_PRESS && type !== Clutter.EventType.BUTTON_RELEASE) ||
             event.get_button() !== Clutter.BUTTON_SECONDARY)
@@ -43,5 +39,4 @@ export function createSecondaryClickBin(properties, onClick) {
             onClick();
         return Clutter.EVENT_STOP;
     });
-    return bin;
 }

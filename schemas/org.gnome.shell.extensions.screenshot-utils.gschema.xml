@@ -28,6 +28,11 @@
       <default>false</default>
       <summary>Copy the screenshot image to the clipboard</summary>
     </key>
+    <key name="enable-shortcut-commands" type="b">
+      <default>false</default>
+      <summary>Allow shortcut commands</summary>
+      <description>Allow local session-bus clients to request screenshots. Enable explicitly before assigning custom keyboard shortcuts.</description>
+    </key>
     <key name="mute-screenshot-sound" type="b">
       <default>false</default>
       <summary>Mute the screenshot capture sound</summary>

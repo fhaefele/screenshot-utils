@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-
-Gio._promisify(Gio.File.prototype, 'make_directory_async', 'make_directory_finish');
+import {callAsync} from './async-utils.js';
 
 export async function ensureDirectory(directory, cancellable) {
     try {
-        await directory.make_directory_async(GLib.PRIORITY_DEFAULT, cancellable);
+        await callAsync(directory, 'make_directory_async', GLib.PRIORITY_DEFAULT, cancellable);
     } catch (error) {
         if (error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
             return;

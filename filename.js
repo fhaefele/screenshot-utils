@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 export function sanitizeFilename(value) {
     const cleaned = value
+        // Filenames cannot contain ASCII control characters.
+        // eslint-disable-next-line no-control-regex
         .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
         .replace(/\s+/g, ' ')
         .replace(/[. ]+$/g, '')

@@ -85,6 +85,11 @@ async function movePointer(pointer, x, y) {
 }
 
 async function click(pointer, actor) {
+    await waitUntil(() => {
+        const [x, y] = actor.get_transformed_position();
+        const [width, height] = actor.get_transformed_size();
+        return actor.is_mapped() && [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0;
+    }, 'Clickable actor was not allocated');
     const [x, y] = actor.get_transformed_position();
     const [width, height] = actor.get_transformed_size();
     await movePointer(pointer, x + width / 2, y + height / 2);
@@ -175,6 +180,12 @@ export async function run() {
         }));
 
     try {
+        assert(!settings.get_boolean('enable-shortcut-commands'), 'Shortcut commands are enabled by default');
+        const deniedCommand = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(deniedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable' && !extension._busy,
+            'Capture API accepted a command without permission');
+        settings.set_boolean('enable-shortcut-commands', true);
+        print('PASS: screenshot command access requires explicit opt-in');
         const button = Main.panel.statusArea[UUID];
         assert(!button._nativeUiButton, 'Redundant native screenshot UI button is present');
         await click(pointer, button);
@@ -488,10 +499,9 @@ export async function run() {
         await waitUntil(() => !extension._selector && !extension._busy, 'Shortcut selection did not finish');
         checkPng(directory, 'Shortcut-area.png');
         await requestCapture('window');
-        await waitUntil(() => extension._windowSession && Main.screenshotUI.visible &&
-            !Main.screenshotUI._panel.visible, 'Shortcut did not open Window');
+        await waitUntil(() => extension._windowSession?.visible, 'Shortcut did not open Window');
         await Scripting.sleep(250);
-        await click(pointer, Main.screenshotUI._windowSelectors.flatMap(selector => selector.windows())[0]);
+        await click(pointer, extension._windowSession.windows.keys().next().value);
         await waitUntil(() => !extension._windowSession && !extension._busy, 'Shortcut window capture did not finish');
         checkPng(directory, 'Shortcut-window.png');
         assert(JSON.stringify(nativeKeys.get_strv('show-screenshot-ui')) === JSON.stringify(originalPrint),
@@ -540,25 +550,25 @@ export async function run() {
         const nativeUi = Main.screenshotUI;
         const originalSave = nativeUi._saveScreenshot;
         const originalCapture = nativeUi._onCaptureButtonClicked;
-        const originalConstraints = nativeUi._closeButton.get_constraints();
+        const nativeState = () => [nativeUi._showPointerButton.checked, nativeUi._selectionButton.checked,
+            nativeUi._screenButton.checked, nativeUi._windowButton.checked, nativeUi._panel.visible];
+        const originalState = nativeState();
+        const assertNativeState = () => assert(JSON.stringify(nativeState()) === JSON.stringify(originalState) &&
+            nativeUi._saveScreenshot === originalSave && nativeUi._onCaptureButtonClicked === originalCapture,
+        'Extension changed native screenshot state');
         await click(pointer, Main.panel.statusArea[UUID]);
         await Scripting.sleep(200);
         await click(pointer, Main.panel.statusArea[UUID]._windowButton);
-        await waitUntil(() => extension._windowSession && nativeUi.visible && nativeUi._windowButton.checked,
-            'Window action did not open GNOME window overview');
-        await Scripting.sleep(250);
-        assert(!nativeUi._panel.visible && nativeUi._closeButton.visible,
-            'Window picker did not hide the toolbar and retain its X');
-        const thumbnails = nativeUi._windowSelectors.flatMap(selector => selector.windows());
-        assert(thumbnails.length >= 2, 'GNOME window overview did not show both windows');
-        const thumbnail = thumbnails.find(window => !window.checked);
-        assert(thumbnail, 'No alternative window available to select');
-        const chosenWindow = extension._windowSession.windows.get(thumbnail);
-        const chosenActor = global.get_window_actors().find(actor => actor.meta_window === chosenWindow);
-        assert(thumbnail.boundingBox.width === chosenWindow.get_frame_rect().width &&
-            thumbnail.boundingBox.height === chosenWindow.get_frame_rect().height,
-        'Window thumbnail was mapped to a different window');
-        // Native window captures include the buffer's shadows, beyond the frame rectangle.
+        await waitUntil(() => extension._windowSession?.visible, 'Window action did not open its picker');
+        await Scripting.sleep(100);
+        assert(!nativeUi.visible, 'Window picker opened the native screenshot UI');
+        assertNativeState();
+        const picker = extension._windowSession;
+        const thumbnails = [...picker.windows.keys()];
+        assert(thumbnails.length >= 2, 'Window picker did not show both windows');
+        const thumbnail = thumbnails.find(card => picker.windows.get(card) !== global.display.get_focus_window()) ?? thumbnails[0];
+        const chosenWindow = picker.windows.get(thumbnail);
+        const chosenActor = chosenWindow.get_compositor_private();
         const expectedWidth = Math.round(chosenWindow.get_buffer_rect().width * chosenActor.get_resource_scale());
         await preview('window-overview.png');
         settings.set_int('capture-delay-ms', 1000);
@@ -567,21 +577,16 @@ export async function run() {
         await waitUntil(() => !extension._windowSession && !extension._busy, 'Window capture did not finish');
         const windowPng = checkPng(directory, 'Integration-window.png');
         const actualWidth = ((windowPng[16] * 256 + windowPng[17]) * 256 + windowPng[18]) * 256 + windowPng[19];
-        assert(actualWidth === expectedWidth,
-            `Window overview captured the wrong window: PNG width ${actualWidth}, expected ${expectedWidth}`);
+        assert(actualWidth === expectedWidth, 'Window picker captured the wrong window');
         assert(GLib.get_monotonic_time() - windowStartedAt >= 1_000_000, 'Window capture ignored delay');
+        assert(picker.destroyed && picker.windows.size === 0, 'Window picker retained actors or window references');
         assert(extension._notificationSource === null, 'Disabled notifications were shown');
-        assert(nativeUi._saveScreenshot === originalSave, 'Window picker changed the native save workflow permanently');
-        assert(nativeUi._onCaptureButtonClicked === originalCapture && nativeUi._panel.visible,
-            'Window picker did not restore native controls');
-        assert(nativeUi._closeButton.get_constraints().every((constraint, index) => constraint === originalConstraints[index]),
-            'Window picker did not restore close-button constraints');
-        print('PASS: window-only overview, thumbnail click, delay and native control restoration');
+        assertNativeState();
+        print('PASS: owned window picker thumbnails, delay, destruction and unchanged native state');
 
         settings.set_int('capture-delay-ms', 0);
         await extension._openWindowUi();
-        await Scripting.sleep(250);
-        await click(pointer, nativeUi._windowSelectors.flatMap(selector => selector.windows())[0]);
+        await click(pointer, extension._windowSession.windows.keys().next().value);
         await waitUntil(() => !extension._windowSession && !extension._busy, 'Immediate window capture did not finish');
         checkPng(directory, 'Integration-window-2.png');
         print('PASS: immediate window thumbnail capture');
@@ -591,53 +596,45 @@ export async function run() {
             keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
             keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
             await Scripting.sleep(30);
-            assert(nativeUi._windowButton.checked && nativeUi._shotButton.checked && nativeUi._windowButton.reactive,
-                'Native keyboard shortcut switched the window-only picker mode');
+            assert(extension._windowSession?.visible && !nativeUi.visible, 'Native shortcut interrupted the window picker');
+            assertNativeState();
         }
         keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
         keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
         await waitUntil(() => !extension._windowSession, 'Escape did not cancel window selection');
         assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window picker Escape took a screenshot');
-        assert(nativeUi._saveScreenshot === originalSave, 'Window picker Escape leaked the save override');
-        print('PASS: native window picker Escape');
+        print('PASS: window picker Escape');
 
         await extension._openWindowUi();
-        await Scripting.sleep(250);
-        await click(pointer, nativeUi._closeButton);
-        await waitUntil(() => !extension._windowSession, 'X did not cancel window selection');
-        assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window picker X took a screenshot');
-        assert(nativeUi._panel.visible && nativeUi._onCaptureButtonClicked === originalCapture,
-            'Window picker X leaked native control changes');
-        print('PASS: window picker mouse cancellation');
+        await click(pointer, extension._windowSession._closeButton);
+        await waitUntil(() => !extension._windowSession, 'Cancel button did not cancel window selection');
+        assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window picker Cancel took a screenshot');
+        assertNativeState();
+        print('PASS: window picker Cancel button');
 
-        const nativeParents = nativeUi._windowSelectors.map(selector => selector.get_parent());
         for (const onThumbnail of [true, false]) {
             await extension._openWindowUi();
-            await Scripting.sleep(250);
+            await Scripting.sleep(100);
             let x = 50;
             let y = 50;
             if (onThumbnail) {
-                const window = nativeUi._windowSelectors.flatMap(selector => selector.windows())[0];
-                const [windowX, windowY] = window.get_transformed_position();
-                const [width, height] = window.get_transformed_size();
-                x = windowX + width / 2;
-                y = windowY + height / 2;
+                const card = extension._windowSession.windows.keys().next().value;
+                const [cardX, cardY] = card.get_transformed_position();
+                const [width, height] = card.get_transformed_size();
+                x = cardX + width / 2;
+                y = cardY + height / 2;
             }
             await movePointer(pointer, x, y);
-            await Scripting.sleep(30);
             const session = extension._windowSession;
-            const thumbnails = nativeUi._windowSelectors.flatMap(selector => selector.windows());
-            const checkedBefore = thumbnails.map(window => window.checked);
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
             await Scripting.sleep(30);
-            assert(extension._windowSession === session && !session.cancelled && session.selected === null &&
-                thumbnails.every((window, index) => window.checked === checkedBefore[index]),
+            assert(extension._windowSession === session && !session.cancelled && session.selected === null,
                 'Window right-click press changed selection before cancellation');
             pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
             await waitUntil(() => !extension._windowSession, 'Right-click did not cancel window selection');
+            assert(session.destroyed && session.windows.size === 0, 'Right-click retained the picker');
             assert(!directory.get_child('Integration-window-3.png').query_exists(null), 'Window right-click took a screenshot');
-            assert(nativeUi._windowSelectors.every((selector, index) => selector.get_parent() === nativeParents[index]),
-                'Window right-click did not restore native actor parents');
+            assertNativeState();
         }
         print('PASS: window right-click cancels on thumbnails and background');
 
@@ -645,7 +642,8 @@ export async function run() {
         await Scripting.sleep(250);
         assert(nativeUi._panel.visible, 'Standard GNOME screenshot toolbar stayed hidden');
         nativeUi.close(true);
-        print('PASS: standard GNOME screenshot UI restoration');
+        assertNativeState();
+        print('PASS: standard GNOME screenshot UI remains unchanged');
 
         const modalCount = Main.modalCount;
         let selection = extension._selectArea();
@@ -764,6 +762,13 @@ export async function run() {
         settings.set_int('capture-delay-ms', 0);
         selection = extension._selectArea();
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Region selector did not grab input');
+        const disabledSelector = extension._selector;
+        extension.disable();
+        assert(disabledSelector.destroyed && !extension._selector && Main.modalCount === modalCount,
+            'Disable did not destroy the region selector synchronously');
+        // Restore the actor before asking Shell to disable it. Shell 51 queues
+        // settings changes; an already-absent actor cannot confirm completion.
+        extension.enable();
         Main.extensionManager.disableExtension(UUID);
         await waitUntil(() => !Main.panel.statusArea[UUID], 'Extension did not disable');
         await selection;
@@ -776,17 +781,78 @@ export async function run() {
         await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not re-enable');
         extension = Main.panel.statusArea[UUID]._extension;
         await extension._openWindowUi();
-        assert(extension._windowSession && nativeUi.visible, 'Window picker did not reopen');
+        const disabledPicker = extension._windowSession;
+        assert(disabledPicker?.visible, 'Window picker did not reopen');
+        extension.disable();
+        assert(disabledPicker.destroyed && disabledPicker.windows.size === 0 && Main.modalCount === modalCount,
+            'Disable did not destroy the picker synchronously');
+        extension.enable();
         Main.extensionManager.disableExtension(UUID);
         await waitUntil(() => !Main.panel.statusArea[UUID], 'Extension did not disable');
-        assert(!nativeUi.visible && !extension._windowSession, 'Disable left the window overview open');
-        assert(nativeUi._saveScreenshot === originalSave, 'Disable leaked the native save override');
-        assert(nativeUi._onCaptureButtonClicked === originalCapture && nativeUi._panel.visible,
-            'Disable leaked native control changes');
+        assert(!nativeUi.visible && !extension._windowSession, 'Disable left the window picker open');
+        assertNativeState();
         assert(Main.modalCount === modalCount, 'Disable leaked the window picker modal grab');
         for (const method of Object.keys(soundSpies))
             assert(player[method] === soundSpies[method], `Disable did not restore ${method}`);
         print('PASS: active window picker cancellation on disable');
+
+        Main.extensionManager.enableExtension(UUID);
+        await waitUntil(() => Main.panel.statusArea[UUID], 'Extension did not re-enable for opening cancellation');
+        extension = Main.panel.statusArea[UUID]._extension;
+        const openingRun = extension._run;
+        const opening = extension._openWindowUi();
+        extension.disable();
+        assert(openingRun.pending.size === 0 && !extension._windowSession && Main.modalCount === modalCount,
+            'Disable retained opening-picker work');
+        extension.enable();
+        await opening;
+        assert(!extension._windowSession && !extension._busy && Main.modalCount === modalCount,
+            'Old picker opening changed the re-enabled extension');
+        assertNativeState();
+        print('PASS: picker opening cancellation across immediate disable/re-enable');
+
+        const earlySelection = extension._selectArea();
+        const earlySelector = extension._selector;
+        const selectionRun = extension._run;
+        extension.disable();
+        assert(earlySelector.destroyed && !extension._selector && selectionRun.pending.size === 0,
+            'Disable retained the selector before its modal grab');
+        extension.enable();
+        await earlySelection;
+        assert(!extension._selector && !extension._busy && Main.modalCount === modalCount,
+            'Old selection changed the re-enabled extension');
+        print('PASS: selection cancellation before input grab across disable/re-enable');
+
+        const metadata = {...extension.metadata, uuid: 'review-failure@fxth.dev', dir: extension.dir, path: extension.path};
+        const earlyFailure = new extension.constructor(metadata);
+        earlyFailure.getSettings = () => { throw new Error('Settings unavailable'); };
+        let enableError = null;
+        try {
+            earlyFailure.enable();
+        } catch (error) {
+            enableError = error;
+        }
+        assert(enableError?.message === 'Settings unavailable' && !earlyFailure._run && !earlyFailure._settings,
+            'Early enable failure was not cleaned up');
+        const lateFailure = new extension.constructor(metadata);
+        const activeSounds = Object.fromEntries(Object.keys(soundSpies).map(method => [method, player[method]]));
+        const patchSound = lateFailure._patchScreenshotSound;
+        lateFailure._patchScreenshotSound = () => {
+            patchSound.call(lateFailure);
+            throw new Error('Late enable failure');
+        };
+        enableError = null;
+        try {
+            lateFailure.enable();
+        } catch (error) {
+            enableError = error;
+        }
+        assert(enableError?.message === 'Late enable failure' && !Main.panel.statusArea[metadata.uuid] &&
+            !lateFailure._button && !lateFailure._settings && !lateFailure._run && !lateFailure._injectionManager,
+        'Late enable failure retained extension resources');
+        for (const method of Object.keys(activeSounds))
+            assert(player[method] === activeSounds[method], 'Late enable failure retained sound overrides');
+        print('PASS: early and late enable failure rollback');
     } finally {
         Main.extensionManager.disableExtension(UUID);
         for (const method of Object.keys(originalSounds))

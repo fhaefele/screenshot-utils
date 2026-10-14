@@ -10,7 +10,7 @@ try {
     const path = join(directory, 'runtime.js');
     await bundleLegacy('legacy-runtime.js', path, 'LegacyRuntime', {
         preamble: 'globalThis.bootstrapReady = true;',
-        footer: 'globalThis.bundleReady = typeof LegacyRuntime.Extension === \"function\";',
+        footer: 'globalThis.bundleReady = typeof LegacyRuntime.Extension === "function";',
     });
     const schema = {};
     let loadedDirectory;

@@ -4,7 +4,7 @@ Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.0
 
 ![Screenshot Utils capture menu and preferences](https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/assets/screenshot-utils.png)
 
-- Selection, Screen and Window capture. Release a selection or click a window to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
+- Selection, Screen and Window capture. Release a selection or choose a window from the thumbnail dialog to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
 - Stepped delay: 0-30 seconds. Exact seconds, save folder, filenames, mouse pointer, clipboard, sound and notifications in Preferences. Sound mute also applies to GNOME's native screenshots.
 - PNGs saved to Pictures by default. Absolute, `~/` and home-relative paths supported; missing folders created. For delayed selections, move the pointer inside the area before capture.
 
@@ -30,7 +30,7 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
+Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default; enabling it permits local applications to request screenshots, even with notifications off. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -44,6 +44,7 @@ GNOME stores the shortcuts across logins and handles conflicts. Commands require
 
 ```sh
 npm test
+npm run lint
 npm run test:gnome  # Shell 45-51
 npm run test:legacy # Shell 42-44
 ```
