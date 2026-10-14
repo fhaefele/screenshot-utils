@@ -144,11 +144,12 @@ export async function checkPreferences(preferences) {
             widget.title === 'Enable keyboard shortcuts');
         const commandSwitch = Adw.SwitchRow ? enableShortcuts : descendants(enableShortcuts).find(widget => widget instanceof Gtk.Switch);
         const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Source');
-        assert(!commandSwitch.active && !setup.visible && setup.selected === Gtk.INVALID_LIST_POSITION,
-            'Disabled shortcuts showed or preselected a source');
+        assert(!commandSwitch.active && !setup.visible && setup.selected === 0,
+            'Disabled shortcuts showed source controls');
         commandSwitch.active = true;
-        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === Gtk.INVALID_LIST_POSITION,
-            'Master switch did not reveal explicit source selection');
+        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === 0 &&
+            settings.get_string('shortcut-setup') === 'gnome',
+            'Master switch did not reveal the default GNOME source');
         assert(setup.model.get_n_items() === 2 &&
             setup.model.get_string(0) === 'GNOME Keyboard Settings' && setup.model.get_string(1) === 'Extension',
             'Source choices differ from the two supported modes');

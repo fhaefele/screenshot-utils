@@ -229,12 +229,15 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     const sync = () => {
         const on = settings.get_boolean('shortcuts-enabled');
         const source = settings.get_string('shortcut-setup');
+        if (on && !sources.includes(source)) {
+            settings.set_string('shortcut-setup', sources[0]);
+            return;
+        }
         const ask = settings.get_boolean('ask-command-confirmation');
         const available = approvalProxy?.get_cached_property('Available')?.get_boolean() ?? false;
         const approved = approvalProxy?.get_cached_property('SilentCommandsApproved')?.get_boolean() ?? false;
         updating = true;
-        const sourceIndex = sources.indexOf(source);
-        setup.selected = sourceIndex < 0 ? Gtk.INVALID_LIST_POSITION : sourceIndex;
+        setup.selected = Math.max(0, sources.indexOf(source));
         permission.selected = ask ? 0 : 1;
         updating = false;
         setup.visible = on;
