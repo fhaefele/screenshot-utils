@@ -30,7 +30,7 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default. Each command requires confirmation in GNOME Shell, even with notifications off. Turning access off cancels pending command captures; turning it back on requires a new request and confirmation. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
+Preferences → Keyboard Shortcuts offers two setup methods. **GNOME Keyboard Settings** is the default and preserves existing custom shortcuts. Enable **Allow shortcut commands**, which is off by default, then add a name, command and key in View and Customize Shortcuts → Custom Shortcuts. Preferences provides copy buttons and opens Keyboard Settings. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -38,7 +38,11 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
 ```
 
-GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences; local session-bus clients can call them. Captures respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it.
+**Ask before screenshots from commands** is on by default. Turning it off requests one approval inside GNOME Shell. Choose **Allow for this session** to let any local program request screenshots without further prompts, or **Keep asking** to restore confirmation for each command. Changing permissions or setup mode, disabling the extension, or restarting Shell clears approval. Locking may disable the extension. The preference alone never grants silent access; after approval resets, use **Approve for this session** or run a command to request approval again. Notifications can be off without suppressing confirmation.
+
+**Extension preferences** provides Selection, Screen and Window shortcut recorders with Clear buttons. All keys start unassigned. GNOME reserves the combinations globally and keypresses start capture directly. Occupied combinations are rejected without replacing the previous assignment or other system shortcuts. Assignments are checked when edited and when the extension is enabled. External capture commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and can occupy combinations you want to use for extension shortcuts.
+
+Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME Keyboard Settings. Turning command access off cancels pending command captures.
 
 ## Test
 

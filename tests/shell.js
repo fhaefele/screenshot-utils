@@ -4,6 +4,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
+import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
@@ -101,9 +102,13 @@ async function click(pointer, actor) {
 }
 
 function requestCapture(mode) {
+    return requestCommand('Capture', new GLib.Variant('(s)', [mode]));
+}
+
+function requestCommand(method, parameters = null) {
     return new Promise((resolve, reject) => Gio.DBus.session.call(
-        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', 'Capture',
-        new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', method,
+        parameters, null, Gio.DBusCallFlags.NONE, 5000, null,
         (connection, result) => {
             try {
                 resolve(connection.call_finish(result));
@@ -612,6 +617,117 @@ export async function run() {
             'System shortcut commands changed Print Screen');
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
+
+        settings.set_string('filename-template', 'Silent-{N}');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Silent setting bypassed Shell approval');
+        assert(extension._commandDialog.session && extension._run.silentCommandEpoch === null,
+            'Silent preference granted access without a Shell gesture');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Declined session approval did not finish');
+        assert(settings.get_boolean('ask-command-confirmation') &&
+            !directory.get_child('Silent-screen.png').query_exists(null), 'Keep asking did not restore confirmation');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestCommand('ApproveSilentCommands');
+        await waitUntil(() => extension._commandDialog?.visible, 'Preferences session approval did not open');
+        await preview('session-approval.png');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Session approval did not finish');
+        assert(extension._run.silentCommandEpoch === extension._run.commandEpoch &&
+            !directory.get_child('Silent-screen.png').query_exists(null), 'Approval itself captured a screenshot');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Approved silent command did not finish');
+        assert(!extension._commandDialog, 'Approved silent command prompted again');
+        checkPng(directory, 'Silent-screen.png');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Second silent command did not finish');
+        checkPng(directory, 'Silent-screen-2.png');
+        settings.set_string('filename-template', 'Silent-revoked-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        await requestCapture('screen');
+        await Scripting.sleep(50);
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_boolean('ask-command-confirmation', false);
+        await waitUntil(() => !extension._busy, 'Silent revocation did not cancel the delay');
+        assert(extension._run.silentCommandEpoch === null &&
+            !directory.get_child('Silent-revoked-screen.png').query_exists(null), 'Revoked silent capture continued');
+        settings.set_int('capture-delay-ms', 0);
+        await requestCommand('ApproveSilentCommands');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Reapproval did not finish');
+        extension.disable();
+        extension.enable();
+        assert(extension._run.silentCommandEpoch === null, 'Session approval survived disable/re-enable');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Restarted extension reused silent approval');
+        assert(extension._commandDialog.session, 'Restarted extension did not request session approval');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Restart approval did not finish');
+        print('PASS: explicit Shell session consent, immediate silent commands, revocation and restart reset');
+
+        settings.set_string('filename-template', 'Native-{N}');
+        settings.set_string('shortcut-setup', 'extension');
+        settings.set_string('shortcut-screen', 'a');
+        assert(settings.get_string('shortcut-screen') === '' && !extension._shortcuts.bindings.has('screen'),
+            'External preference registered a plain typing key');
+        settings.set_string('shortcut-screen', '<Control><Shift>F10');
+        assert(extension._shortcuts.bindings.has('screen'), 'Free native shortcut did not register');
+        const originalScreenBinding = settings.get_string('shortcut-screen');
+        settings.set_string('shortcut-selection', originalScreenBinding);
+        assert(!extension._shortcuts.bindings.has('selection') && settings.get_string('shortcut-selection') === '' &&
+            settings.get_value('shortcut-status').deep_unpack().selection, 'Duplicate native shortcut was accepted');
+        const wmKeys = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.keybindings'});
+        const switchApps = wmKeys.get_strv('switch-applications');
+        assert(switchApps.length > 0, 'No predefined system shortcut for conflict test');
+        settings.set_string('shortcut-screen', switchApps[0]);
+        assert(settings.get_string('shortcut-screen') === originalScreenBinding &&
+            JSON.stringify(wmKeys.get_strv('switch-applications')) === JSON.stringify(switchApps),
+        'Native conflict replaced a previous or system assignment');
+        settings.set_string('shortcut-selection', '<Control><Shift>F11');
+        settings.set_string('shortcut-window', '<Control><Shift>F12');
+        const blockedCommand = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(blockedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable',
+            'Extension shortcut mode accepted an external capture command');
+        const pressShortcut = async key => {
+            for (const modifier of [Clutter.KEY_Control_L, Clutter.KEY_Shift_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            for (const modifier of [Clutter.KEY_Shift_L, Clutter.KEY_Control_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.RELEASED);
+            await Scripting.sleep(30);
+        };
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
+            'Native screen keypress did not capture');
+        assert(!extension._commandDialog, 'Native keypress opened command confirmation');
+        checkPng(directory, 'Native-screen.png');
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native selection keypress did not open selection');
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
+        await waitUntil(() => !extension._selector, 'Native selection did not cancel');
+        await pressShortcut(Clutter.KEY_F12);
+        await waitUntil(() => extension._windowSession?.visible, 'Native window keypress did not open window picker');
+        await Scripting.sleep(250);
+        await click(pointer, extension._windowSession.windows.keys().next().value);
+        await waitUntil(() => !extension._windowSession && !extension._busy, 'Native window capture did not finish');
+        checkPng(directory, 'Native-window.png');
+        const nativeNames = [...extension._shortcuts.bindings.values()].map(binding => binding.name);
+        extension.disable();
+        assert(nativeNames.every(name => !(name in Main.wm._allowedKeybindings)), 'Native shortcut allowances leaked on disable');
+        const freeProbe = global.display.grab_accelerator(originalScreenBinding, Meta.KeyBindingFlags.NONE);
+        assert(freeProbe !== Meta.KeyBindingAction.NONE, 'Disable did not release native shortcut');
+        global.display.ungrab_accelerator(freeProbe);
+        extension.enable();
+        assert(extension._shortcuts.bindings.size === 3, 'Native shortcuts did not restore after enable');
+        settings.set_string('shortcut-setup', 'gnome');
+        assert(extension._shortcuts.bindings.size === 0 && settings.get_string('shortcut-screen') === originalScreenBinding,
+            'Mode switch did not release keys and preserve configuration');
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: real native keypresses, all modes, conflicts, external-command isolation and complete shortcut cleanup');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
             GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,

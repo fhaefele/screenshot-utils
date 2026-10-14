@@ -21,6 +21,8 @@ import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 import {createCaptureIcon} from './capture-icons.js';
+import {ShortcutManager} from './shortcut-manager.js';
+import {CAPTURE_BUS_PATH} from './shortcuts.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
@@ -29,6 +31,7 @@ const CAPTURE_INTERFACE = `<node>
         <method name="Capture">
             <arg type="s" name="mode" direction="in"/>
         </method>
+        <method name="ApproveSilentCommands"/>
     </interface>
 </node>`;
 
@@ -192,22 +195,11 @@ export default class ScreenshotUtilsExtension extends Extension {
         ensureSaveLocation(this._settings);
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
-        this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
+        this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0,
+            silentCommandEpoch: null};
         this._commandDialog = null;
-        this._commandPermissionChangedId = this._settings.connect('changed::enable-shortcut-commands', () => {
-            // External false→true changes may be queued together. The current
-            // value cannot prove that an approved request stayed authorized.
-            this._run.commandEpoch++;
-            this._cancelCommandDialog();
-            if (this._selector && this._selector.command !== null)
-                this._cancelSelector();
-            if (this._windowSession && this._windowSession.command !== null)
-                this._cancelWindowUi();
-            for (const cancel of this._run.pending) {
-                if (cancel.command !== null)
-                    cancel();
-            }
-        });
+        this._commandSettingIds = ['enable-shortcut-commands', 'ask-command-confirmation', 'shortcut-setup']
+            .map(key => this._settings.connect(`changed::${key}`, () => this._revokeCommandPermission()));
         this._busy = false;
         this._selector = null;
         this._windowSession = null;
@@ -216,10 +208,15 @@ export default class ScreenshotUtilsExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._button);
         this._injectionManager = new InjectionManager();
         this._patchScreenshotSound();
+        this._shortcuts = new ShortcutManager(this._settings, mode => {
+            this._captureMode(mode).catch(error => this._notify(`Screenshot failed: ${error.message}`));
+        });
+        this._shortcuts.enable();
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
+            ApproveSilentCommandsAsync: (_params, invocation) => this._requestCapture('screen', invocation, true),
         });
-        this._dbus.export(Gio.DBus.session, '/org/gnome/shell/extensions/screenshotutils');
+        this._dbus.export(Gio.DBus.session, CAPTURE_BUS_PATH);
     }
 
     disable() {
@@ -227,6 +224,8 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._run = null;
         this._dbus?.unexport();
         this._dbus = null;
+        this._shortcuts?.destroy();
+        this._shortcuts = null;
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
@@ -244,9 +243,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._button = null;
         if (this._locationChangedId)
             this._settings.disconnect(this._locationChangedId);
-        if (this._commandPermissionChangedId)
-            this._settings.disconnect(this._commandPermissionChangedId);
-        this._commandPermissionChangedId = 0;
+        for (const id of this._commandSettingIds ?? [])
+            this._settings.disconnect(id);
+        this._commandSettingIds = null;
         this._locationChangedId = 0;
         this._settings = null;
         this._lockdownSettings = null;
@@ -261,8 +260,28 @@ export default class ScreenshotUtilsExtension extends Extension {
     _checkCommandAllowed(run, command) {
         this._checkActive(run);
         if (command !== null && (command !== run.commandEpoch ||
+            this._settings.get_string('shortcut-setup') !== 'gnome' ||
             !this._settings.get_boolean('enable-shortcut-commands')))
             throw new Error('Screenshot command permission was revoked');
+    }
+
+    _revokeCommandPermission() {
+        const run = this._run;
+        if (!run)
+            return;
+        // Every notification invalidates consent, even when queued writes have
+        // restored the previous value before Shell dispatches the notification.
+        run.commandEpoch++;
+        run.silentCommandEpoch = null;
+        this._cancelCommandDialog();
+        if (this._selector && this._selector.command !== null)
+            this._cancelSelector();
+        if (this._windowSession && this._windowSession.command !== null)
+            this._cancelWindowUi();
+        for (const cancel of run.pending) {
+            if (cancel.command !== null)
+                cancel();
+        }
     }
 
     _checkCaptureAllowed(run, command = null) {
@@ -273,10 +292,16 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Saving screenshots is disabled by system policy');
     }
 
-    _requestCapture(mode, invocation) {
-        if (!this._settings?.get_boolean('enable-shortcut-commands')) {
+    _requestCapture(mode, invocation, approvalOnly = false) {
+        if (!this._settings?.get_boolean('enable-shortcut-commands') ||
+            this._settings.get_string('shortcut-setup') !== 'gnome') {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Enable Allow shortcut commands in Screenshot Utils preferences first');
+                'Use GNOME Keyboard Settings mode and enable Allow shortcut commands in preferences first');
+            return;
+        }
+        if (approvalOnly && this._settings.get_boolean('ask-command-confirmation')) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Turn off Ask before screenshots from commands to request session approval');
             return;
         }
         if (!['selection', 'screen', 'window'].includes(mode)) {
@@ -298,44 +323,57 @@ export default class ScreenshotUtilsExtension extends Extension {
             return;
         }
         const run = this._run;
-        this._runCommand(mode, run, run.commandEpoch).catch(error => {
+        this._runCommand(mode, run, run.commandEpoch, approvalOnly).catch(error => {
             if (this._run === run)
                 this._notify(`Screenshot failed: ${error.message}`);
         });
-        // Reply immediately; Shell requires a user gesture for each command.
+        // Reply immediately; only Shell's own dialog can grant command consent.
         invocation.return_value(null);
     }
 
-    async _runCommand(mode, run, command) {
+    async _runCommand(mode, run, command, approvalOnly = false) {
         this._busy = true;
         let allowed;
         let dialog = null;
         try {
             await this._prepareCapture(run, command);
             this._checkCaptureAllowed(run, command);
-            dialog = new CommandConfirmation();
-            this._commandDialog = dialog;
-            const choice = new Promise(resolve => {
-                dialog.connect('destroy', () => resolve(false));
-                dialog.populate(mode, choice => {
-                    dialog.cancelled ||= !choice;
-                    resolve(choice);
+            const session = !this._settings.get_boolean('ask-command-confirmation');
+            if (session && run.silentCommandEpoch === command) {
+                allowed = true;
+            } else {
+                dialog = new CommandConfirmation();
+                this._commandDialog = dialog;
+                const choice = new Promise(resolve => {
+                    dialog.connect('destroy', () => resolve(false));
+                    dialog.populate(mode, choice => {
+                        dialog.cancelled ||= !choice;
+                        resolve(choice);
+                    }, session);
                 });
-            });
-            if (!dialog.open())
-                throw new Error('Could not grab screenshot confirmation input');
-            allowed = await choice;
-            await this._wait(0, run, null, null, null, command);
-            this._checkCaptureAllowed(run, command);
-            allowed &&= !dialog.cancelled;
+                if (!dialog.open())
+                    throw new Error('Could not grab screenshot confirmation input');
+                allowed = await choice;
+                await this._wait(0, run, null, null, null, command);
+                this._checkCaptureAllowed(run, command);
+                allowed &&= !dialog.cancelled;
+                if (session && allowed)
+                    run.silentCommandEpoch = command;
+                else if (session)
+                    this._settings.set_boolean('ask-command-confirmation', true);
+            }
         } finally {
             if (this._commandDialog === dialog)
                 this._cancelCommandDialog();
             if (this._run === run)
                 this._busy = false;
         }
-        if (!allowed)
+        if (!allowed || approvalOnly)
             return;
+        await this._captureMode(mode, command);
+    }
+
+    async _captureMode(mode, command = null) {
         if (mode === 'selection')
             await this._selectArea(command);
         else if (mode === 'window')

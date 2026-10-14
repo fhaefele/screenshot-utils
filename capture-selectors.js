@@ -66,14 +66,18 @@ class CaptureDialog extends ModalDialog.ModalDialog {
 
 export const CommandConfirmation = GObject.registerClass(
 class CommandConfirmation extends CaptureDialog {
-    populate(mode, onChoice) {
+    populate(mode, onChoice, session = false) {
+        this.session = session;
         const subject = {screen: 'your entire screen', selection: 'a selected area', window: 'a selected window'}[mode];
-        this.contentLayout.add_child(new St.Label({text: 'Allow screenshot command?', style_class: 'headline'}));
-        const description = new St.Label({text: `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
+        this.contentLayout.add_child(new St.Label({text: session
+            ? 'Allow screenshots without asking?' : 'Allow screenshot command?', style_class: 'headline'}));
+        const description = new St.Label({text: session
+            ? 'Any local program can request screenshots without asking.\nAccess lasts until permission changes, this extension is disabled or GNOME Shell restarts.'
+            : `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
         description.clutter_text.line_wrap = true;
         this.contentLayout.add_child(description);
-        this._cancelButton = this.addButton({label: 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
-        this._allowButton = this.addButton({label: 'Allow', action: () => onChoice(true)});
+        this._cancelButton = this.addButton({label: session ? 'Keep asking' : 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
+        this._allowButton = this.addButton({label: session ? 'Allow for this session' : 'Allow', action: () => onChoice(true)});
         this.setInitialKeyFocus(this._cancelButton);
     }
 });

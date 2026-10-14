@@ -36,14 +36,19 @@ export function createEntryRow(properties) {
 }
 
 export function createSwitchRow(settings, key, title) {
+    const {row, control} = createToggleRow(title);
+    settings.bind(key, control, 'active', 0);
+    return row;
+}
+
+export function createToggleRow(title) {
     const row = Adw.SwitchRow ? new Adw.SwitchRow({title}) : new Adw.ActionRow({title});
     const control = Adw.SwitchRow ? row : new Gtk.Switch({valign: Gtk.Align.CENTER});
     if (control !== row) {
         row.add_suffix(control);
         row.activatable_widget = control;
     }
-    settings.bind(key, control, 'active', 0);
-    return row;
+    return {row, control};
 }
 
 export async function selectFolder(parent, initialFolder, cancellable) {
