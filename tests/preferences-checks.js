@@ -83,6 +83,9 @@ export async function checkPreferences(preferences) {
         await waitUntil(() => release?.visible, 'Cached release notice did not appear');
         assert(release.has_css_class('link') && release.uri === 'https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0',
             'Release notice does not open the matching release');
+        assert(github.get_parent() === release.get_parent() &&
+            github.get_parent().orientation === Gtk.Orientation.HORIZONTAL &&
+            github.get_parent().halign === Gtk.Align.CENTER, 'Release footer is not a single centered line');
         assert(!widgets.some(widget => widget instanceof Gtk.Button && widget.label === 'Update'),
             'Preferences unexpectedly contain an installer button');
         assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,

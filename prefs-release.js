@@ -38,15 +38,15 @@ async function fetchJSON(session, url, cancellable) {
 
 export function addReleaseFooter(page, metadata) {
     const group = new Adw.PreferencesGroup();
-    const footer = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2, halign: Gtk.Align.CENTER});
-    const details = new Gtk.Box({spacing: 6, halign: Gtk.Align.CENTER});
-    details.append(new Gtk.Label({label: `Screenshot Utils v${metadata['version-name']}`,
+    const footer = new Gtk.Box({spacing: 6, halign: Gtk.Align.CENTER});
+    footer.append(new Gtk.Label({label: `Screenshot Utils v${metadata['version-name']}`,
         css_classes: ['dim-label', 'caption']}));
-    details.append(new Gtk.Label({label: '·', css_classes: ['dim-label', 'caption']}));
+    footer.append(new Gtk.Label({label: '·', css_classes: ['dim-label', 'caption']}));
     const github = new Gtk.LinkButton({label: 'GitHub', uri: REPOSITORY_URL});
     github.add_css_class('caption');
-    details.append(github);
-    footer.append(details);
+    footer.append(github);
+    const separator = new Gtk.Label({label: '·', visible: false, css_classes: ['dim-label', 'caption']});
+    footer.append(separator);
     const available = new Gtk.LinkButton({label: 'New release available', visible: false, halign: Gtk.Align.CENTER});
     available.add_css_class('caption');
     footer.append(available);
@@ -82,6 +82,7 @@ export function addReleaseFooter(page, metadata) {
             if (uri)
                 available.uri = uri;
             available.visible = uri !== null;
+            separator.visible = uri !== null;
         },
     }).catch(() => {
         // Offline, cache and cancellation errors must not interrupt preferences.
