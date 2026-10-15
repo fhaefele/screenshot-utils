@@ -73,7 +73,7 @@ export function addReleaseFooter(page, metadata, directory) {
         },
         save: async cache => {
             GLib.mkdir_with_parents(cacheFile.get_parent().get_path(), 0o700);
-            await callAsync(cacheFile, 'replace_contents_async', new TextEncoder().encode(JSON.stringify(cache)),
+            await callAsync(cacheFile, 'replace_contents_bytes_async', new GLib.Bytes(JSON.stringify(cache)),
                 null, false, Gio.FileCreateFlags.PRIVATE, cancellable);
         },
         fetchJSON: url => {

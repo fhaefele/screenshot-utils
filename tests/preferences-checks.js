@@ -1,5 +1,6 @@
 import {buildFilename} from '../filename.js';
 import {releaseCacheFile} from '../prefs-release.js';
+import {callAsync} from '../async-utils.js';
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -68,8 +69,8 @@ export async function checkPreferences(preferences) {
     const previousCache = cacheExisted ? cache.load_contents(null)[1] : null;
     GLib.mkdir_with_parents(cache.get_parent().get_path(), 0o700);
     const fakeRelease = {tag: 'v999.0', shellVersions: Array.from({length: 10}, (_, index) => String(42 + index))};
-    cache.replace_contents(JSON.stringify({checkedAt: Date.now(), release: fakeRelease}), null, false,
-        Gio.FileCreateFlags.PRIVATE, null);
+    await callAsync(cache, 'replace_contents_bytes_async', new GLib.Bytes(JSON.stringify({checkedAt: Date.now(), release: fakeRelease})),
+        null, false, Gio.FileCreateFlags.PRIVATE, null);
     const window = new Adw.PreferencesWindow();
 
     try {
