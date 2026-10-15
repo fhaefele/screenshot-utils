@@ -38,6 +38,8 @@ gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 
 After installing or updating, log out and back in, then enable Screenshot Utils in Extensions.
 
+Preferences shows the installed version and checks GitHub for updates when opened, at most once every 24 hours. A `latest: v<version>` link appears only for a newer compatible release and opens its GitHub page. Rerun the installer to update.
+
 ## Keyboard shortcuts
 
 Shortcuts start off. In Preferences, turn on **Enable keyboard shortcuts** and choose a **Source**. New setups select Extension.
@@ -65,4 +67,4 @@ Packages are in `dist/legacy/` and `dist/modern/`. Shell tests use isolated sett
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Inspired by [Screenshot Tool](https://github.com/OttoAllmendinger/gnome-shell-screenshot) and [No Screenshot Box](https://github.com/abdallah-alkanani/no-screenshot-box).
+[GPL-3.0-or-later](LICENSE). GitHub mark from [Octicons](https://github.com/primer/octicons), MIT. Inspired by [Screenshot Tool](https://github.com/OttoAllmendinger/gnome-shell-screenshot) and [No Screenshot Box](https://github.com/abdallah-alkanani/no-screenshot-box).

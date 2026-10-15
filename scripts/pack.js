@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 const sources = ['extension.js', 'prefs.js', 'filename.js', 'location.js', 'delay.js',
     'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js', 'capture-icons.js',
-    'shortcuts.js', 'shortcut-manager.js', 'shortcut-prefs.js'];
+    'shortcuts.js', 'shortcut-manager.js', 'shortcut-prefs.js', 'release-info.js', 'prefs-release.js'];
 
 // esbuild bundles shared local modules. Only GJS's native imports stay external.
 const legacyRequire = `function require(specifier) {
@@ -32,6 +32,12 @@ export async function bundleLegacy(entry, outfile, globalName, {preamble = '', f
                 const url = new URL(args.path);
                 const name = url.hostname;
                 const version = url.searchParams.get('version');
+                if (name === 'Soup') {
+                    // Follow the installed Shell build, including alternate Soup configurations.
+                    return {contents: `imports.gi.versions.Soup =
+                        imports.misc.config.HAVE_SOUP2 ? '2.4' : '3.0';
+                        export default imports.gi.Soup;`, loader: 'js'};
+                }
                 return {contents: (version ? `imports.gi.versions.${name} = ${JSON.stringify(version)};\n` : '') +
                     `export default imports.gi.${name};`, loader: 'js'};
             });
@@ -49,7 +55,7 @@ async function pack() {
         for (const target of ['modern', 'legacy']) {
             const directory = resolve(stage, target);
             await mkdir(directory);
-            for (const source of ['schemas', 'LICENSE'])
+            for (const source of ['schemas', 'icons', 'LICENSE'])
                 await cp(resolve(root, source), resolve(directory, source), {recursive: true});
             const targetMetadata = {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']};
             await writeFile(resolve(directory, 'metadata.json'), `${JSON.stringify(targetMetadata, null, 2)}\n`);
@@ -67,7 +73,7 @@ async function pack() {
             await mkdir(targetOutput, {recursive: true});
             const extras = target === 'modern' ? sources.slice(2) : [];
             execFileSync('gnome-extensions', ['pack', '--force', ...extras.map(source => `--extra-source=${source}`),
-                '--extra-source=LICENSE', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
+                '--extra-source=icons', '--extra-source=LICENSE', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
             if (target === 'legacy') {
                 // Older Shell versions need compiled schemas included in the package.
                 execFileSync('glib-compile-schemas', ['--strict', resolve(directory, 'schemas')]);

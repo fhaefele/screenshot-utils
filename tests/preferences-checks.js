@@ -1,4 +1,6 @@
 import {buildFilename} from '../filename.js';
+import {releaseCacheFile} from '../prefs-release.js';
+import {callAsync} from '../async-utils.js';
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -62,11 +64,36 @@ export async function checkPreferences(preferences) {
     settings.set_string('shortcut-setup', '');
     settings.set_boolean('shortcuts-enabled', false);
     settings.set_boolean('ask-command-confirmation', true);
+    const cache = releaseCacheFile(preferences.metadata.uuid);
+    const cacheExisted = cache.query_exists(null);
+    const previousCache = cacheExisted ? cache.load_contents(null)[1] : null;
+    GLib.mkdir_with_parents(cache.get_parent().get_path(), 0o700);
+    const fakeRelease = {tag: 'v999.0', shellVersions: Array.from({length: 10}, (_, index) => String(42 + index))};
+    await callAsync(cache, 'replace_contents_bytes_async', new GLib.Bytes(JSON.stringify({checkedAt: Date.now(), release: fakeRelease})),
+        null, false, Gio.FileCreateFlags.PRIVATE, null);
     const window = new Adw.PreferencesWindow();
 
     try {
         preferences.fillPreferencesWindow(window);
         const widgets = descendants(window);
+        assert(widgets.some(widget => widget instanceof Gtk.Label &&
+            widget.label === `Screenshot Utils v${preferences.metadata['version-name']}`), 'Installed release footer is missing');
+        const github = widgets.find(widget => widget instanceof Gtk.Label && widget.get_text() === 'fhaefele/screenshot-utils');
+        assert(github?.use_markup && github.label.includes('href="https://github.com/fhaefele/screenshot-utils"'),
+            'Repository footer is not a native text link');
+        const mark = widgets.find(widget => widget instanceof Gtk.Image && widget.gicon instanceof Gio.FileIcon &&
+            widget.gicon.get_file().get_basename() === 'github-symbolic.svg' && widget.pixel_size === 16);
+        assert(mark?.get_parent() === github.get_parent(), 'GitHub mark is not grouped with the repository link');
+        const release = widgets.find(widget => widget instanceof Gtk.Label && widget.get_text().startsWith('latest:'));
+        await waitUntil(() => release?.visible, 'Cached release notice did not appear');
+        assert(release.use_markup && release.get_text() === 'latest: v999.0' &&
+            release.label.includes('href="https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0"'),
+            'Latest release is not a native text link to the matching release');
+        const footer = github.get_parent().get_parent();
+        assert(footer === release.get_parent() && footer.orientation === Gtk.Orientation.HORIZONTAL &&
+            footer.halign === Gtk.Align.CENTER, 'Release footer is not a single centered line');
+        assert(!widgets.some(widget => widget instanceof Gtk.Button && widget.label === 'Update'),
+            'Preferences unexpectedly contain an installer button');
         assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,
             'Preferences contain an obsolete capture switch');
         const folder = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Screenshot folder');
@@ -315,6 +342,10 @@ export async function checkPreferences(preferences) {
         for (const [key, value] of previousBindings)
             settings.set_string(key, value);
         window.close();
+        if (cacheExisted)
+            cache.replace_contents(previousCache, null, false, Gio.FileCreateFlags.PRIVATE, null);
+        else
+            cache.delete(null);
     }
 
 }

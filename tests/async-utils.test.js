@@ -34,3 +34,12 @@ capture.capture_finish = () => { throw cancelled; };
 await assert.rejects(callAsync(capture, 'capture'), error => error === cancelled);
 capture.capture = () => { throw cancelled; };
 await assert.rejects(callAsync(capture, 'capture'), error => error === cancelled);
+
+const bytesWriter = {
+    replace_contents_bytes_async(...args) { args.at(-1)(this, 'write-result'); },
+    replace_contents_finish(result) {
+        assert.equal(result, 'write-result');
+        return [true, 'new-etag'];
+    },
+};
+assert.deepEqual(await callAsync(bytesWriter, 'replace_contents_bytes_async', 'bytes', null, false, 0, null), ['new-etag']);

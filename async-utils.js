@@ -2,7 +2,9 @@
 
 // Wrap one operation without changing shared GI prototypes during import.
 export function callAsync(target, method, ...args) {
-    const finish = method.endsWith('_async') ? `${method.slice(0, -5)}finish` : `${method}_finish`;
+    // GIO's bytes variant shares its finish method with replace_contents_async.
+    const finish = method === 'replace_contents_bytes_async' ? 'replace_contents_finish'
+        : method.endsWith('_async') ? `${method.slice(0, -5)}finish` : `${method}_finish`;
     return new Promise((resolve, reject) => {
         target[method](...args, (_source, result) => {
             try {
