@@ -7,6 +7,7 @@ import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
+import {DELAY_STEPS} from '../delay.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
@@ -299,13 +300,15 @@ export async function run() {
                 await preview(`hover-delay-${scheme}.png`);
                 const savedDelay = settings.get_int('capture-delay-ms');
                 const unitPositions = [];
-                for (const milliseconds of [0, 1000, 25000]) {
+                for (const milliseconds of DELAY_STEPS) {
                     settings.set_int('capture-delay-ms', milliseconds);
                     await Scripting.sleep(30);
                     const text = button._delayLabel.clutter_text;
                     const [success, unitX] = text.position_to_coords(button._delayLabel.text.length - 1);
                     assert(success, 'Could not measure the delay unit position');
                     unitPositions.push(button._delayLabel.get_transformed_position()[0] + unitX);
+                    if (milliseconds === 100)
+                        await preview(`delay-100ms-${scheme}.png`);
                 }
                 settings.set_int('capture-delay-ms', savedDelay);
                 assert(Math.max(...unitPositions) - Math.min(...unitPositions) < 1,

@@ -105,7 +105,7 @@ class CaptureButton extends PanelMenu.Button {
             reactive: true,
             x_expand: true,
             style_class: 'popup-inactive-menu-item',
-            style: 'padding: 0; spacing: 4px;',
+            style: 'padding: 0; spacing: 0;',
         });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
         for (const row of [menuRow, captureRow, controlsRow])
