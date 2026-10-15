@@ -852,6 +852,16 @@ export async function run() {
                 keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.RELEASED);
             await Scripting.sleep(30);
         };
+        Main.overview.show();
+        await waitUntil(() => Main.overview.visible && !Main.overview.animationInProgress,
+            'Overview did not open for native shortcut exclusion');
+        await pressShortcut(Clutter.KEY_F10);
+        await Scripting.sleep(100);
+        assert(!extension._busy && !directory.get_child('Native-screen.png').query_exists(null),
+            'Native shortcut captured while Overview owned a modal grab');
+        Main.overview.hide();
+        await waitUntil(() => !Main.overview.visible && !Main.overview.animationInProgress,
+            'Overview did not close after native shortcut exclusion');
         await pressShortcut(Clutter.KEY_F10);
         await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
             'Native screen keypress did not capture');

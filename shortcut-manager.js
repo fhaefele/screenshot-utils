@@ -35,7 +35,7 @@ export class ShortcutManager {
                 if (this._syncing)
                     return;
                 this.epoch++;
-                        this._sync(key);
+                this._sync(key);
                 this._changed();
             })]);
         this._sync();
@@ -94,7 +94,8 @@ export class ShortcutManager {
                 // Keep the old assignment until the new combination is reserved.
                 this._remove(mode);
                 this.bindings.set(mode, {action, name, accelerator});
-                Main.wm.allowKeybinding(name, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW);
+                // Overview owns a Shell modal grab and is excluded by the capture guard.
+                Main.wm.allowKeybinding(name, Shell.ActionMode.NORMAL);
             }
             this._settings.set_value('shortcut-status', new GLib.Variant('a{ss}', statuses));
         } finally {
