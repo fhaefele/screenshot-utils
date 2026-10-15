@@ -49,7 +49,7 @@ async function pack() {
         for (const target of ['modern', 'legacy']) {
             const directory = resolve(stage, target);
             await mkdir(directory);
-            for (const source of ['schemas', 'assets', 'LICENSE', 'README.md'])
+            for (const source of ['schemas', 'LICENSE'])
                 await cp(resolve(root, source), resolve(directory, source), {recursive: true});
             const targetMetadata = {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']};
             await writeFile(resolve(directory, 'metadata.json'), `${JSON.stringify(targetMetadata, null, 2)}\n`);
@@ -67,7 +67,7 @@ async function pack() {
             await mkdir(targetOutput, {recursive: true});
             const extras = target === 'modern' ? sources.slice(2) : [];
             execFileSync('gnome-extensions', ['pack', '--force', ...extras.map(source => `--extra-source=${source}`),
-                '--extra-source=assets', '--extra-source=LICENSE', '--extra-source=README.md', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
+                '--extra-source=LICENSE', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
             if (target === 'legacy') {
                 // Older Shell versions need compiled schemas included in the package.
                 execFileSync('glib-compile-schemas', ['--strict', resolve(directory, 'schemas')]);
