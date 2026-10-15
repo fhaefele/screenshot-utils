@@ -30,7 +30,9 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default. Each command requires confirmation in GNOME Shell, even with notifications off. Turning access off cancels pending command captures; turning it back on requires a new request and confirmation. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
+Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select GNOME keyboard settings. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+
+**GNOME keyboard settings** preserves existing custom shortcuts. Add a name, command and key in View and customize shortcuts → Custom shortcuts. Preferences provides copy buttons and opens Keyboard settings. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -38,7 +40,11 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
 ```
 
-GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences; local session-bus clients can call them. Captures respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it.
+**Ask for every request** is on by default. Turning it off opens a Shell approval dialog. **Skip confirmation** allows any local application to request screenshots for the chosen duration. **Ask for every request · Always** is the default. Both Ask and Skip can be remembered for **This session** or **Always**. Session choices are confirmed again on the first screenshot command after logout, Shell restart or revocation; screen locking preserves them. Always remembers the choice across logins, while skipping confirmation still requires an installation-specific grant. Both choices are saved in settings. Switching to Extension resets GNOME command settings to Ask/Always. **Ask for every request** restores individual confirmation and asks separately about the pending screenshot. Turning shortcuts off, changing source/permission/duration, explicitly disabling the extension or uninstalling it revokes approval. Preferences shows the saved Ask/Skip choice and duration below the confirmation switch, even after session approval expires. Changing the confirmation switch in either direction opens the scope dialog; expired session choices reopen it on the first screenshot command. Saved persistent permissions follow normal desktop-settings trust: unrestricted programs running as you can modify them. The installation record is removed on uninstall; reinstalling or replacing the installation directory requires persistent approval again. Notifications can be off without suppressing confirmation.
+
+**Extension** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
+
+Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME keyboard settings. Turning command access off cancels pending command captures.
 
 ## Test
 

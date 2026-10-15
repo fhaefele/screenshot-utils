@@ -20,11 +20,11 @@ export default [
         languageOptions: {globals: globals.node},
     },
     {
-        files: ['extension.js', 'capture-selectors.js', 'capture-icons.js', 'shell-compat.js', 'location.js', 'filename.js', 'delay.js', 'async-utils.js', 'legacy-runtime.js'],
+        files: ['extension.js', 'capture-selectors.js', 'capture-icons.js', 'shell-compat.js', 'location.js', 'filename.js', 'delay.js', 'async-utils.js', 'legacy-runtime.js', 'shortcuts.js', 'shortcut-permission.js', 'shortcut-manager.js'],
         rules: {'no-restricted-imports': ['error', {patterns: ['gi://Gtk*', 'gi://Gdk', 'gi://Gdk?*', 'gi://Adw*', 'node:*']}]},
     },
     {
-        files: ['prefs.js', 'prefs-compat.js'],
+        files: ['prefs.js', 'prefs-compat.js', 'shortcut-prefs.js'],
         rules: {'no-restricted-imports': ['error', {patterns: ['gi://Clutter*', 'gi://Meta*', 'gi://St', 'gi://St?*', 'gi://Shell*', 'node:*']}]},
     },
 ];

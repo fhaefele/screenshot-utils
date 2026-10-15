@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
@@ -6,6 +7,7 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import {SelectArea} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {connectSecondaryClick} from './shell-compat.js';
@@ -66,16 +68,89 @@ class CaptureDialog extends ModalDialog.ModalDialog {
 
 export const CommandConfirmation = GObject.registerClass(
 class CommandConfirmation extends CaptureDialog {
-    populate(mode, onChoice) {
+    populate(mode, onChoice, approval = false, duration = 'persistent') {
+        this.approval = approval;
+        this.duration = duration;
+        this.askSelected = false;
         const subject = {screen: 'your entire screen', selection: 'a selected area', window: 'a selected window'}[mode];
-        this.contentLayout.add_child(new St.Label({text: 'Allow screenshot command?', style_class: 'headline'}));
-        const description = new St.Label({text: `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
-        description.clutter_text.line_wrap = true;
-        this.contentLayout.add_child(description);
-        this._cancelButton = this.addButton({label: 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
-        this._allowButton = this.addButton({label: 'Allow', action: () => onChoice(true)});
+        const content = new Dialog.MessageDialogContent({
+            title: approval ? 'Allow screenshots without asking for permission?' : 'Allow screenshot command?',
+            description: approval
+                ? 'With GNOME keyboard settings as the source, other apps can run these screenshot commands.\n\nChoose <b>Ask for every request</b> to approve each screenshot. Choose <b>Skip confirmation</b> to allow all requests automatically.'
+                : `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`,
+        });
+        const title = content.get_first_child().clutter_text;
+        title.line_wrap = true;
+        title.ellipsize = Pango.EllipsizeMode.NONE;
+        if (approval)
+            content.get_last_child().clutter_text.set_markup(content.description);
+        this.contentLayout.add_child(content);
+        if (approval) {
+            this.contentLayout.add_child(new St.Label({text: 'Remember this choice',
+                style: 'font-weight: bold; margin-top: 18px; margin-bottom: 8px;'}));
+            const options = new St.Widget({layout_manager: new Clutter.BoxLayout({
+                orientation: Clutter.Orientation.VERTICAL, spacing: 8, homogeneous: true,
+            })});
+            this.contentLayout.add_child(options);
+            this._durationButtons = new Map();
+            this.connect('destroy', () => this._durationButtons.clear());
+            this.connect('key-press-event', (_actor, event) => {
+                if (event.get_key_symbol() !== Clutter.KEY_Escape)
+                    return Clutter.EVENT_PROPAGATE;
+                this.cancel();
+                return Clutter.EVENT_STOP;
+            });
+            for (const [value, label] of [['session', 'This session'], ['persistent', 'Always']]) {
+                const body = new St.BoxLayout({x_expand: true, style: 'spacing: 12px;'});
+                body.add_child(new St.Icon({icon_size: 20, width: 20, height: 20, y_align: Clutter.ActorAlign.CENTER}));
+                const text = new St.Label({text: label, y_align: Clutter.ActorAlign.CENTER});
+                body.add_child(text);
+                const button = new St.Button({child: body, style_class: 'popup-menu-item', toggle_mode: true,
+                    style: 'padding: 10px 12px;',
+                    can_focus: true, reactive: true, x_expand: true,
+                    accessible_role: Atk.Role.RADIO_BUTTON, label_actor: text});
+                const select = () => {
+                    this.duration = value;
+                    updateSelection();
+                    button.grab_key_focus();
+                };
+                button.connect('clicked', select);
+                button.connect('key-press-event', (_actor, event) => {
+                    if (![Clutter.KEY_Up, Clutter.KEY_Down, Clutter.KEY_Left, Clutter.KEY_Right].includes(event.get_key_symbol()))
+                        return Clutter.EVENT_PROPAGATE;
+                    const next = value === 'session' ? 'persistent' : 'session';
+                    this.duration = next;
+                    updateSelection();
+                    this._durationButtons.get(next).grab_key_focus();
+                    return Clutter.EVENT_STOP;
+                });
+                this._durationButtons.set(value, button);
+                options.add_child(button);
+            }
+            const hint = new St.Label({style: 'margin-top: 8px;'});
+            hint.clutter_text.line_wrap = true;
+            this.contentLayout.add_child(hint);
+            const updateSelection = () => {
+                for (const [value, button] of this._durationButtons) {
+                    const selected = value === this.duration;
+                    button.checked = selected;
+                    // The radio icon carries selection; retain native hover/focus styling.
+                    button.remove_style_pseudo_class('checked');
+                    const icon = button.get_child().get_first_child();
+                    icon.icon_name = selected ? 'radio-checked-symbolic' : 'radio-symbolic';
+                }
+                hint.text = this.duration === 'session'
+                    ? 'You will be asked to choose again after logout or a Shell restart.'
+                    : 'This choice applies across logins and Shell restarts.';
+            };
+            updateSelection();
+        }
+        this._cancelButton = this.addButton({label: approval ? 'Ask for every request' : 'Cancel',
+            action: () => { this.askSelected = approval; onChoice(false); }, key: approval ? null : Clutter.KEY_Escape});
+        this._allowButton = this.addButton({label: approval ? 'Skip confirmation' : 'Allow', action: () => onChoice(true)});
         this.setInitialKeyFocus(this._cancelButton);
     }
+
 });
 
 export const WindowPicker = GObject.registerClass(
@@ -96,7 +171,7 @@ class WindowPicker extends CaptureDialog {
         const monitor = Main.layoutManager.currentMonitor;
         const columns = Math.max(1, Math.min(4, Math.floor(monitor.width * 0.75 / 240)));
         this.contentLayout.add_child(new St.Label({text: 'Choose a window', style_class: 'headline'}));
-        this.contentLayout.add_child(new St.Label({text: 'Esc or right-click to cancel', style_class: 'dim-label'}));
+        this.contentLayout.add_child(new St.Label({text: 'Escape or right-click to cancel', style_class: 'dim-label'}));
         const scroll = new St.ScrollView({
             hscrollbar_policy: St.PolicyType.NEVER,
             vscrollbar_policy: St.PolicyType.AUTOMATIC,

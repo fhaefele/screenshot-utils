@@ -4,6 +4,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
+import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
@@ -101,12 +102,33 @@ async function click(pointer, actor) {
 }
 
 function requestCapture(mode) {
+    return requestCommand('Capture', new GLib.Variant('(s)', [mode]));
+}
+
+function requestCommand(method, parameters = null) {
     return new Promise((resolve, reject) => Gio.DBus.session.call(
-        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', 'Capture',
-        new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', method,
+        parameters, null, Gio.DBusCallFlags.NONE, 5000, null,
         (connection, result) => {
             try {
                 resolve(connection.call_finish(result));
+            } catch (error) {
+                reject(error);
+            }
+        }));
+}
+
+function requestApproval(ask = false) {
+    return requestCommand('ConfigureCommandConfirmation', new GLib.Variant('(b)', [ask]));
+}
+
+function approvalStatus(property = 'SilentCommandsApproved') {
+    return new Promise((resolve, reject) => Gio.DBus.session.call(
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'org.freedesktop.DBus.Properties', 'Get',
+        new GLib.Variant('(ss)', ['dev.fxth.ScreenshotUtils', property]),
+        null, Gio.DBusCallFlags.NONE, 5000, null, (connection, result) => {
+            try {
+                resolve(connection.call_finish(result).get_child_value(0).get_variant().get_boolean());
             } catch (error) {
                 reject(error);
             }
@@ -180,11 +202,15 @@ export async function run() {
         }));
 
     try {
-        assert(!settings.get_boolean('enable-shortcut-commands'), 'Shortcut commands are enabled by default');
+        assert(!settings.get_boolean('shortcuts-enabled'), 'Shortcut commands are enabled by default');
         const deniedCommand = await requestCapture('screen').then(() => null, error => error);
         assert(Gio.DBusError.get_remote_error(deniedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable' && !extension._busy,
             'Capture API accepted a command without permission');
-        settings.set_boolean('enable-shortcut-commands', true);
+        assert(settings.get_string('shortcut-setup') === '', 'A shortcut source was selected by default');
+        settings.set_boolean('shortcuts-enabled', true);
+        const noSource = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(noSource) === 'dev.fxth.ScreenshotUtils.Unavailable', 'Enabled switch bypassed source selection');
+        settings.set_string('shortcut-setup', 'gnome');
         print('PASS: screenshot command access requires explicit opt-in');
         const button = Main.panel.statusArea[UUID];
         assert(!button._nativeUiButton, 'Redundant native screenshot UI button is present');
@@ -484,8 +510,8 @@ export async function run() {
             await requestCapture(mode);
             await waitUntil(() => extension._commandDialog?.visible, 'Revocation confirmation did not open');
             const dialog = extension._commandDialog;
-            settings.set_boolean('enable-shortcut-commands', false);
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', false);
+            settings.set_boolean('shortcuts-enabled', true);
             assert(dialog.destroyed && !extension._commandDialog, 'Revocation left confirmation open');
             await waitUntil(() => !extension._busy, 'Revoked confirmation did not finish');
         }
@@ -493,8 +519,8 @@ export async function run() {
         await requestCapture('screen');
         await allowCommand();
         await Scripting.sleep(50);
-        settings.set_boolean('enable-shortcut-commands', false);
-        settings.set_boolean('enable-shortcut-commands', true);
+        settings.set_boolean('shortcuts-enabled', false);
+        settings.set_boolean('shortcuts-enabled', true);
         await waitUntil(() => !extension._busy, 'Revoked command delay did not finish');
         assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
             'Re-enabling access revived an approved screenshot');
@@ -507,17 +533,17 @@ export async function run() {
             const source = Gio.SettingsSchemaSource.new_from_directory(ARGV[0] + '/schemas',
                 Gio.SettingsSchemaSource.get_default(), false);
             const settings = new Gio.Settings({settings_schema: source.lookup('org.gnome.shell.extensions.screenshot-utils', true)});
-            settings.set_boolean('enable-shortcut-commands', false);
+            settings.set_boolean('shortcuts-enabled', false);
             Gio.Settings.sync();
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', true);
             Gio.Settings.sync();
         `, extension.path], Gio.SubprocessFlags.NONE);
         // Delay Shell's notification dispatch until the external setting is true.
         externalToggle.wait_check(null);
-        assert(settings.get_boolean('enable-shortcut-commands'), 'External toggle did not re-enable commands');
+        assert(settings.get_boolean('shortcuts-enabled'), 'External toggle did not re-enable commands');
         // Backends may coalesce the writes. Exercise their queued changed signal
         // with the final value, then also allow actual external notifications.
-        extension._settings.emit('changed::enable-shortcut-commands', 'enable-shortcut-commands');
+        extension._settings.emit('changed::shortcuts-enabled', 'shortcuts-enabled');
         assert(extension._run.commandEpoch > commandEpoch,
             'An enabled-value notification preserved an approved command');
         await waitUntil(() => !extension._busy, 'External revocation did not finish');
@@ -531,8 +557,8 @@ export async function run() {
                 ? extension._selector?._grabHelper.grabbed : extension._windowSession?.visible,
             'Approved command picker did not open');
             const picker = mode === 'selection' ? extension._selector : extension._windowSession;
-            settings.set_boolean('enable-shortcut-commands', false);
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', false);
+            settings.set_boolean('shortcuts-enabled', true);
             assert(picker.destroyed && !extension._selector && !extension._windowSession,
                 'Revocation left command picker open');
             await waitUntil(() => !extension._busy, 'Revoked picker did not finish');
@@ -541,8 +567,8 @@ export async function run() {
         try {
             extension._createUniqueFile = async (...args) => {
                 const output = await createBeforeRevocation.call(extension, ...args);
-                settings.set_boolean('enable-shortcut-commands', false);
-                settings.set_boolean('enable-shortcut-commands', true);
+                settings.set_boolean('shortcuts-enabled', false);
+                settings.set_boolean('shortcuts-enabled', true);
                 return output;
             };
             await requestCapture('screen');
@@ -612,6 +638,411 @@ export async function run() {
             'System shortcut commands changed Print Screen');
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
+
+        assert(settings.get_string('command-approval-duration') === 'persistent' && settings.get_boolean('ask-command-confirmation'),
+            'GNOME defaults are not Ask/Always');
+        settings.set_string('command-approval-duration', 'session');
+        settings.set_string('filename-template', 'Session-{N}');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'First session command did not request approval');
+        assert(extension._commandDialog.approval && extension._commandDialog.duration === 'session' &&
+            extension._commandDialog._durationButtons.get('session').checked,
+            'Session approval dialog has the wrong default duration');
+        assert(extension._commandDialog._cancelButton.label === 'Ask for every request' &&
+            extension._commandDialog._allowButton.label === 'Skip confirmation', 'Approval choices have the wrong labels');
+        if (GLib.getenv('SCREENSHOT_UTILS_TEST_PREVIEW_DIR'))
+            await Scripting.sleep(200); // Let symbolic radio textures finish loading for the preview.
+        await preview('session-approval.png');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Session approval capture did not finish');
+        checkPng(directory, 'Session-screen.png');
+        assert(await approvalStatus() && !settings.get_boolean('silent-command-approved') &&
+            !extension.dir.get_child('.command-approval').query_exists(null), 'Session grant persisted its approval');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Second session capture did not finish');
+        assert(!extension._commandDialog, 'Session grant asked again in the same session');
+        checkPng(directory, 'Session-screen-2.png');
+        const sessionLocked = Main.sessionMode.isLocked;
+        Main.sessionMode.isLocked = true;
+        extension.disable();
+        Main.sessionMode.isLocked = sessionLocked;
+        extension.enable();
+        assert(await approvalStatus(), 'Screen locking revoked session approval');
+        extension.disable();
+        // A new Shell process has no in-memory grant, but retains the preference.
+        extension._commandSession = null;
+        extension.enable();
+        assert(!await approvalStatus() && !settings.get_boolean('ask-command-confirmation') &&
+            settings.get_string('command-approval-duration') === 'session', 'Fresh session restored an expired grant or lost its scope');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'First command in a fresh session bypassed approval');
+        assert(extension._commandDialog.approval && !directory.get_child('Session-screen-3.png').query_exists(null),
+            'Fresh session captured before approval');
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
+        await waitUntil(() => !extension._busy, 'Escape did not cancel session approval');
+        assert(!extension._commandDialog && !await approvalStatus() &&
+            !directory.get_child('Session-screen-3.png').query_exists(null), 'Escape opened another prompt or captured a screenshot');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Session approval did not reopen');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => extension._commandDialog?.visible && !extension._commandDialog.approval,
+            'Ask for every request did not confirm the pending screenshot');
+        assert(settings.get_boolean('ask-command-confirmation'), 'Ask choice was not saved');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Pending request cancellation did not finish');
+        assert(!directory.get_child('Session-screen-3.png').query_exists(null), 'Ask choice implicitly approved a screenshot');
+        assert(extension._permission.policyConfirmed && !extension._permission.approved,
+            'Ask/session did not remember its policy without granting silent access');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask/session did not confirm its next screenshot');
+        assert(!extension._commandDialog.approval, 'Ask/session repeated its policy dialog in the same session');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Ask/session cancellation did not finish');
+        Main.sessionMode.isLocked = true;
+        extension.disable();
+        Main.sessionMode.isLocked = sessionLocked;
+        extension.enable();
+        assert(extension._permission.policyConfirmed, 'Screen locking forgot Ask/session policy');
+        extension.disable();
+        extension._commandSession = null;
+        extension.enable();
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Expired Ask/session policy did not reopen');
+        assert(extension._commandDialog.approval && settings.get_boolean('ask-command-confirmation'),
+            'Expired Ask/session bypassed policy renewal');
+        await click(pointer, extension._commandDialog._durationButtons.get('persistent'));
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => extension._commandDialog?.visible && !extension._commandDialog.approval,
+            'Ask/always did not confirm the pending screenshot');
+        assert(settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'persistent',
+            'Ask choice ignored the chosen Always duration');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Ask/always cancellation did not finish');
+        extension.disable();
+        extension._commandSession = null;
+        extension.enable();
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask/always did not confirm after restart');
+        assert(!extension._commandDialog.approval, 'Ask/always forgot its remembered policy after restart');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Restarted Ask/always cancellation did not finish');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestApproval();
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask/session setup dialog did not open');
+        await click(pointer, extension._commandDialog._durationButtons.get('session'));
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Ask/session setup did not finish');
+        assert(settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'session' &&
+            extension._permission.policyConfirmed, 'Ask choice ignored its selected session duration');
+        settings.set_boolean('shortcuts-enabled', false);
+        settings.set_boolean('shortcuts-enabled', true);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Revoked Ask/session policy did not reopen on first use');
+        assert(extension._commandDialog.approval, 'Revoked Ask/session only opened per-request confirmation');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => extension._commandDialog?.visible && !extension._commandDialog.approval,
+            'Renewed Ask/session did not confirm the pending screenshot');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Renewed Ask/session cancellation did not finish');
+        assert(!directory.get_child('Session-screen-3.png').query_exists(null), 'Ask policy changes implicitly captured a screenshot');
+        settings.set_string('filename-template', 'Ask-policy-switch-{N}');
+        settings.set_boolean('shortcuts-enabled', false);
+        settings.set_boolean('shortcuts-enabled', true);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask/session switch policy did not reopen');
+        assert(extension._commandDialog.approval, 'Expired Ask/session cannot offer Skip');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Ask/session to Skip/session capture did not finish');
+        assert(!settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'session' &&
+            extension._permission.approved, 'Choosing Skip during Ask/session renewal did not save and grant the new policy');
+        checkPng(directory, 'Ask-policy-switch-screen.png');
+        settings.set_string('filename-template', 'Session-{N}');
+        print('PASS: Ask/session and Ask/always choices, scope persistence, lock continuity, first-use renewal, revocation and switching to Skip');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestApproval();
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Session reapproval did not finish');
+        Main.extensionManager.disableExtension(UUID);
+        await waitUntil(() => !Main.panel.statusArea[UUID], 'Session explicit disable did not finish');
+        Main.extensionManager.enableExtension(UUID);
+        await waitUntil(() => Main.panel.statusArea[UUID], 'Session explicit re-enable did not finish');
+        extension = Main.panel.statusArea[UUID]._extension;
+        assert(!await approvalStatus(), 'Explicit disable retained session approval');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Revoked session did not offer new approval');
+        await click(pointer, extension._commandDialog._durationButtons.get('persistent'));
+        for (const [key, value] of [[Clutter.KEY_Left, 'session'], [Clutter.KEY_Right, 'persistent']]) {
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            await waitUntil(() => extension._commandDialog.duration === value &&
+                extension._commandDialog._durationButtons.get(value).checked &&
+                [...extension._commandDialog._durationButtons.values()].filter(button => button.checked).length === 1,
+            'Arrow keys did not change the selected approval duration');
+        }
+        assert(settings.get_string('command-approval-duration') === 'session', 'Unconfirmed duration choice changed settings');
+        await preview('persistent-approval.png');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Persistent choice did not finish the pending screenshot');
+        checkPng(directory, 'Session-screen-3.png');
+        assert(settings.get_string('command-approval-duration') === 'persistent' &&
+            settings.get_boolean('silent-command-approved') && await approvalStatus(), 'Persistent duration was not saved and granted');
+        settings.set_boolean('ask-command-confirmation', true);
+        print('PASS: session approval, lock continuity, first-command renewal, Ask choice, explicit revocation and persistent scope selection');
+
+        settings.set_string('filename-template', 'Silent-{N}');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestApproval();
+        await waitUntil(() => extension._commandDialog?.visible, 'Silent setting bypassed Shell approval');
+        assert(extension._commandDialog.approval && !extension._permission.approved,
+            'Silent preference granted access without a Shell gesture');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Declined session approval did not finish');
+        assert(settings.get_boolean('ask-command-confirmation') &&
+            !directory.get_child('Silent-screen.png').query_exists(null), 'Keep asking did not restore confirmation');
+        settings.set_boolean('ask-command-confirmation', false);
+        await requestApproval();
+        await waitUntil(() => extension._commandDialog?.visible, 'Preferences session approval did not open');
+        await preview('persistent-approval.png');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Session approval did not finish');
+        assert(extension._permission.approved &&
+            !directory.get_child('Silent-screen.png').query_exists(null), 'Approval itself captured a screenshot');
+        assert(await approvalStatus(), 'Preferences approval status did not report granted consent');
+        await requestApproval();
+        await waitUntil(() => extension._commandDialog?.visible, 'Explicit approval request reused a previous grant');
+        assert(extension._commandDialog.approval, 'Repeated approval request opened the wrong dialog');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Repeated approval did not finish');
+        assert(!directory.get_child('Silent-screen.png').query_exists(null), 'Repeated approval captured a screenshot');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Approved silent command did not finish');
+        assert(!extension._commandDialog, 'Approved silent command prompted again');
+        checkPng(directory, 'Silent-screen.png');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Second silent command did not finish');
+        checkPng(directory, 'Silent-screen-2.png');
+        settings.set_string('filename-template', 'Silent-revoked-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        await requestCapture('screen');
+        await Scripting.sleep(50);
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_boolean('ask-command-confirmation', false);
+        await waitUntil(() => !extension._busy, 'Silent revocation did not cancel the delay');
+        assert(!extension._permission.approved &&
+            !directory.get_child('Silent-revoked-screen.png').query_exists(null), 'Revoked silent capture continued');
+        assert(!await approvalStatus(), 'Preferences approval status survived revocation');
+        settings.set_int('capture-delay-ms', 0);
+        await requestApproval();
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Reapproval did not finish');
+        extension.disable();
+        extension.enable();
+        assert(await approvalStatus(), 'Saved command approval did not survive runtime restart');
+        settings.set_string('filename-template', 'Silent-persisted-{N}');
+        await requestCapture('screen');
+        await waitUntil(() => !extension._busy, 'Persisted approval capture did not finish');
+        assert(!extension._commandDialog, 'Runtime restart requested approval again');
+        checkPng(directory, 'Silent-persisted-screen.png');
+        const savedLocked = Main.sessionMode.isLocked;
+        Main.sessionMode.isLocked = true;
+        extension.disable();
+        Main.sessionMode.isLocked = savedLocked;
+        extension.enable();
+        assert(await approvalStatus(), 'Lock transition revoked saved approval');
+        Main.extensionManager.disableExtension(UUID);
+        await waitUntil(() => !Main.panel.statusArea[UUID], 'Explicit disable did not finish');
+        Main.extensionManager.enableExtension(UUID);
+        await waitUntil(() => Main.panel.statusArea[UUID], 'Explicit re-enable did not finish');
+        extension = Main.panel.statusArea[UUID]._extension;
+        assert(!await approvalStatus(), 'Explicit user disable retained saved command permission');
+        await requestApproval();
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Explicit reapproval did not finish');
+        const approvalRecord = extension.dir.get_child('.command-approval');
+        extension.disable();
+        approvalRecord.delete(null);
+        extension.enable();
+        assert(!await approvalStatus() && !settings.get_boolean('silent-command-approved'),
+            'A fresh installation reused retained GSettings approval without its installation record');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Missing approval record did not request approval');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => extension._commandDialog?.visible && !extension._commandDialog.approval,
+            'Reinstall Ask choice did not request individual confirmation');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Install approval decline did not finish');
+        print('PASS: persistent command approval survives restart/lock, explicit disable and reinstall revoke it');
+        // Refresh the helper's inactivity timeout before using its windows again.
+        await Scripting.waitTestWindows();
+
+        settings.set_string('filename-template', 'Native-{N}');
+        settings.set_string('command-approval-duration', 'session');
+        settings.set_string('shortcut-setup', 'extension');
+        assert(settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'persistent' &&
+            !settings.get_boolean('silent-command-approved') && !await approvalStatus(), 'Native source retained GNOME command settings');
+        settings.set_string('shortcut-screen', 'a');
+        assert(settings.get_string('shortcut-screen') === '' && !extension._shortcuts.bindings.has('screen'),
+            'External preference registered a plain typing key');
+        settings.set_string('shortcut-screen', '<Control><Shift>F10');
+        assert(extension._shortcuts.bindings.has('screen'), 'Free native shortcut did not register');
+        const originalScreenBinding = settings.get_string('shortcut-screen');
+        settings.set_string('shortcut-selection', originalScreenBinding);
+        assert(!extension._shortcuts.bindings.has('selection') && settings.get_string('shortcut-selection') === '' &&
+            settings.get_value('shortcut-status').deep_unpack().selection, 'Duplicate native shortcut was accepted');
+        const wmKeys = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.keybindings'});
+        const switchApps = wmKeys.get_strv('switch-applications');
+        assert(switchApps.length > 0, 'No predefined system shortcut for conflict test');
+        settings.set_string('shortcut-screen', switchApps[0]);
+        assert(settings.get_string('shortcut-screen') === originalScreenBinding &&
+            JSON.stringify(wmKeys.get_strv('switch-applications')) === JSON.stringify(switchApps),
+        'Native conflict replaced a previous or system assignment');
+        settings.set_string('shortcut-selection', '<Control><Shift>F11');
+        settings.set_string('shortcut-window', '<Control><Shift>F12');
+        const blockedCommand = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(blockedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable',
+            'Extension shortcut mode accepted an external capture command');
+        const pressShortcut = async key => {
+            for (const modifier of [Clutter.KEY_Control_L, Clutter.KEY_Shift_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            for (const modifier of [Clutter.KEY_Shift_L, Clutter.KEY_Control_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.RELEASED);
+            await Scripting.sleep(30);
+        };
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
+            'Native screen keypress did not capture');
+        assert(!extension._commandDialog, 'Native keypress opened command confirmation');
+        checkPng(directory, 'Native-screen.png');
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native selection keypress did not open selection');
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
+        await waitUntil(() => !extension._selector, 'Native selection did not cancel');
+        await pressShortcut(Clutter.KEY_F12);
+        await waitUntil(() => extension._windowSession?.visible, 'Native window keypress did not open window picker');
+        await Scripting.sleep(250);
+        await click(pointer, extension._windowSession.windows.keys().next().value);
+        await waitUntil(() => !extension._windowSession && !extension._busy, 'Native window capture did not finish');
+        checkPng(directory, 'Native-window.png');
+        settings.set_string('filename-template', 'Native-revoked-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => extension._busy && extension._run.pending.size > 0, 'Native delayed capture did not begin');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._busy, 'Native assignment change did not cancel delayed capture');
+        assert(!directory.get_child('Native-revoked-screen.png').query_exists(null),
+            'Revoked native capture saved a delayed screenshot');
+        settings.set_int('capture-delay-ms', 0);
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native assignment change selector did not open');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._selector, 'Native assignment change did not cancel selection');
+        assert(!directory.get_child('Native-revoked-area.png').query_exists(null),
+            'Revoked native selection saved a screenshot');
+        print('PASS: native assignment changes cancels pending captures and pickers');
+        settings.set_boolean('shortcuts-enabled', false);
+        assert(extension._shortcuts.bindings.size === 0, 'Master switch did not release native keys');
+        assert(settings.get_string('shortcut-screen') === originalScreenBinding, 'Master switch erased saved keys');
+        settings.set_boolean('shortcuts-enabled', true);
+        assert(extension._shortcuts.bindings.size === 3, 'Master switch did not restore native keys immediately');
+        const nativeNames = [...extension._shortcuts.bindings.values()].map(binding => binding.name);
+        extension.disable();
+        assert(nativeNames.every(name => !(name in Main.wm._allowedKeybindings)), 'Native shortcut allowances leaked on disable');
+        const freeProbe = global.display.grab_accelerator(originalScreenBinding, Meta.KeyBindingFlags.NONE);
+        assert(freeProbe !== Meta.KeyBindingAction.NONE, 'Disable did not release native shortcut');
+        global.display.ungrab_accelerator(freeProbe);
+        extension.enable();
+        assert(extension._shortcuts.bindings.size === 3, 'Native shortcuts did not restore after enable');
+        settings.set_string('filename-template', 'Native-restarted-{N}');
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => !extension._busy && directory.get_child('Native-restarted-screen.png').query_exists(null),
+            'Native shortcut did not capture immediately after restart');
+        assert(!extension._commandDialog, 'Native shortcut requested approval after restart');
+        settings.set_string('shortcut-setup', 'gnome');
+        assert(extension._shortcuts.bindings.size === 0 && settings.get_string('shortcut-screen') === originalScreenBinding,
+            'Mode switch did not release keys and preserve configuration');
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: real native keypresses, all modes, conflicts, external-command isolation and complete shortcut cleanup');
+        const originalGrant = extension._permission.grant;
+        const originalNotify = extension._notify;
+        const previousFailureTemplate = settings.get_string('filename-template');
+        let setupFailure = '';
+        try {
+            settings.set_string('filename-template', 'Config-write-failed-{N}');
+            extension._permission.grant = () => { throw new Error('Test approval write failed'); };
+            extension._notify = title => { setupFailure = title; };
+            await requestApproval();
+            await allowCommand();
+            await waitUntil(() => !extension._busy && setupFailure, 'Failed approval save was silently discarded');
+            assert(setupFailure === 'Could not configure screenshot commands: Test approval write failed' &&
+                !await approvalStatus() && !directory.get_child('Config-write-failed-screen.png').query_exists(null),
+                'Approval write failure granted permission, captured a screenshot or lost its feedback');
+        } finally {
+            extension._permission.grant = originalGrant;
+            extension._notify = originalNotify;
+            settings.set_string('filename-template', previousFailureTemplate);
+            settings.set_boolean('ask-command-confirmation', true);
+        }
+        print('PASS: approval-save failure stays revoked, takes no screenshot and reports the failure');
+        // Hold Shell's readiness acknowledgment before GTK requests setup.
+        // Shell applies the toggle itself; GTK must not race settings-file writes.
+        const originalApprovalAvailable = extension._commandConfigurationAvailable;
+        let readinessReads = 0;
+        let acknowledgeApproval = false;
+        extension._commandConfigurationAvailable = function () {
+            readinessReads++;
+            return acknowledgeApproval && originalApprovalAvailable.call(this);
+        };
+        const approvalPreferencesTest = Gio.Subprocess.new([
+            'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
+            GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']),
+            extension.path, 'approval',
+        ], Gio.SubprocessFlags.NONE);
+        await waitUntil(() => settings.get_int('capture-delay-ms') === 123 && readinessReads >= 2,
+            'Preferences did not wait for Shell permission acknowledgment');
+        assert(!extension._commandDialog, 'Preferences requested approval before Shell acknowledged its permission');
+        acknowledgeApproval = true;
+        extension._dbus.emit_property_changed('CommandConfigurationAvailable', new GLib.Variant('b', true));
+        await waitUntil(() => extension._commandDialog?.visible, 'Actual preferences toggle did not open Shell approval');
+        extension._commandConfigurationAvailable = originalApprovalAvailable;
+        assert(extension._commandDialog.approval, 'Actual preferences requested per-capture instead of persistent approval');
+        await allowCommand();
+        await waitUntil(() => settings.get_int('capture-delay-ms') === 124, 'Preferences did not signal granted approval');
+        extension.disable();
+        await waitUntil(() => settings.get_int('capture-delay-ms') === 125, 'Open preferences did not observe runtime stop');
+        extension.enable();
+        await waitUntil(() => settings.get_int('capture-delay-ms') === 126, 'Preferences did not repeat the approval toggle');
+        await waitUntil(() => extension._commandDialog?.visible, 'Repeated preferences toggle did not reopen approval');
+        assert(extension._commandDialog.approval, 'Repeated preferences toggle opened the wrong dialog');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Repeated preferences approval did not finish');
+        settings.set_int('capture-delay-ms', 127);
+        await waitUntil(() => settings.get_int('capture-delay-ms') === 128, 'Preferences did not toggle from Skip to Ask');
+        await waitUntil(() => extension._commandDialog?.visible, 'Skip to Ask did not open scope configuration');
+        assert(extension._commandDialog.approval && settings.get_boolean('ask-command-confirmation'),
+            'Skip to Ask opened a screenshot request instead of scope configuration');
+        await click(pointer, extension._commandDialog._durationButtons.get('session'));
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Ask scope configuration did not finish');
+        assert(settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'session' &&
+            extension._permission.policyConfirmed && !extension._permission.approved, 'Skip to Ask did not save the selected session scope');
+        settings.set_int('capture-delay-ms', 129);
+        await new Promise((resolve, reject) => approvalPreferencesTest.wait_check_async(null, (process, result) => {
+            try {
+                process.wait_check_finish(result);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        }));
+        await waitUntil(() => !extension._busy && !extension._commandDialog, 'Actual approval cleanup did not finish');
+        assert(!await approvalStatus(), 'Closed preferences left revoked approval active');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
             GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,

@@ -7,7 +7,8 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 const sources = ['extension.js', 'prefs.js', 'filename.js', 'location.js', 'delay.js',
-    'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js', 'capture-icons.js'];
+    'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js', 'capture-icons.js',
+    'shortcuts.js', 'shortcut-permission.js', 'shortcut-manager.js', 'shortcut-prefs.js'];
 
 // esbuild bundles shared local modules. Only GJS's native imports stay external.
 const legacyRequire = `function require(specifier) {
