@@ -119,10 +119,10 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     const enabled = createSwitchRow(settings, 'shortcuts-enabled', 'Enable keyboard shortcuts');
     options.append(enabled);
     const status = new Gtk.Label({xalign: 0, wrap: true, css_classes: ['dim-label']});
-    const sources = ['gnome', 'extension'];
+    const sources = ['extension', 'gnome'];
     const setup = new Adw.ComboRow({title: 'Source',
         subtitle: 'Who should manage your keyboard shortcuts?',
-        model: Gtk.StringList.new(['GNOME keyboard settings', 'Extension'])});
+        model: Gtk.StringList.new(['Extension', 'GNOME keyboard settings'])});
     options.append(setup);
     content.append(status);
     const commands = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 6});

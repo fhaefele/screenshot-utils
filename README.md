@@ -30,7 +30,7 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select GNOME keyboard settings. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select Extension. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
 
 **GNOME keyboard settings** preserves existing custom shortcuts. Add a name, command and key in View and customize shortcuts → Custom shortcuts. Preferences provides copy buttons and opens Keyboard settings. Commands also work in a terminal:
 

@@ -166,13 +166,13 @@ export async function checkPreferences(preferences) {
             'Disabled shortcuts showed source controls');
         commandSwitch.active = true;
         assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === 0 &&
-            settings.get_string('shortcut-setup') === 'gnome',
-            'Master switch did not reveal the default GNOME source');
+            settings.get_string('shortcut-setup') === 'extension',
+            'Master switch did not reveal the default Extension source');
         assert(setup.model.get_n_items() === 2 &&
-            setup.model.get_string(0) === 'GNOME keyboard settings' && setup.model.get_string(1) === 'Extension',
+            setup.model.get_string(0) === 'Extension' && setup.model.get_string(1) === 'GNOME keyboard settings',
             'Source choices differ from the two supported modes');
         const sourceExplanation = setup.subtitle;
-        setup.selected = 0;
+        setup.selected = 1;
         assert(settings.get_string('shortcut-setup') === 'gnome', 'GNOME source choice was not saved');
         const commandRows = shortcutWidgets.find(widget => widget instanceof Gtk.ListBox &&
             widget.get_first_child()?.title === 'Selection');
@@ -296,7 +296,7 @@ export async function checkPreferences(preferences) {
         }
         settings.set_string('command-approval-duration', 'session');
         permission.active = false;
-        setup.selected = 1;
+        setup.selected = 0;
         assert(settings.get_boolean('ask-command-confirmation') && settings.get_string('command-approval-duration') === 'persistent' &&
             !settings.get_boolean('silent-command-approved'), 'Extension source did not reset GNOME command settings');
         assert(settings.get_string('shortcut-setup') === 'extension' && !commandRows.get_parent().get_parent().visible,
@@ -330,7 +330,7 @@ export async function checkPreferences(preferences) {
         cancelledKeys.emit('key-pressed', Gdk.KEY_Return, 36, 0);
         assert(settings.get_string('shortcut-selection') === '', 'Keyboard Cancel saved a shortcut');
         settings.set_boolean('ask-command-confirmation', false);
-        setup.selected = 0;
+        setup.selected = 1;
         assert(commandRows.get_parent().get_parent().visible && permission.active &&
             settings.get_boolean('ask-command-confirmation'), 'GNOME source did not restore commands with Ask on');
         assert(setup.subtitle === sourceExplanation &&
