@@ -204,7 +204,8 @@ export async function checkPreferences(preferences) {
         settings.set_boolean('ask-command-confirmation', false);
         assert(!permission.active, 'Ask toggle did not reflect an external settings change');
         setup.selected = 0;
-        assert(settings.get_boolean('ask-command-confirmation'), 'Extension source did not reset GNOME command settings');
+        assert(settings.get_boolean('ask-command-confirmation'),
+            `Extension source did not reset GNOME command settings: source=${settings.get_string('shortcut-setup')}, selected=${setup.selected}`);
         assert(settings.get_string('shortcut-setup') === 'extension' && !commandRows.get_parent().get_parent().visible,
             'Extension setup did not hide command instructions');
         const selectionShortcut = shortcutWidgets.find(widget => widget instanceof Adw.PreferencesRow && widget.title === 'Selection shortcut');
