@@ -195,7 +195,7 @@ export async function run() {
         const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const originalScheme = themeSettings.get_string('color-scheme');
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
-            button._folderButton, button._preferencesButton];
+            button._folderButton, button._preferencesButton, button._cursorButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
         const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
@@ -224,6 +224,45 @@ export async function run() {
                     assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
                         'Switching color scheme changed capture control geometry');
                 });
+                const cursor = button._cursorButton;
+                const delayRow = button._delaySlider.get_parent();
+                const clock = delayRow.get_children().find(actor => actor.visible && actor instanceof St.Icon);
+                const [cursorWidth, cursorHeight] = cursor.child.get_transformed_size();
+                const [clockWidth, clockHeight] = clock.get_transformed_size();
+                assert(cursorWidth === clockWidth && cursorHeight === clockHeight,
+                    `Cursor and clock icons have different sizes: ${cursorWidth}x${cursorHeight} vs ${clockWidth}x${clockHeight}`);
+                const menuWidth = button.menu.actor.width;
+                const rowWidth = delayRow.width;
+                const delay = settings.get_int('capture-delay-ms');
+                cursor.hide();
+                await Scripting.sleep(50);
+                const baselineSliderWidth = button._delaySlider.width;
+                const baselineRowSize = delayRow.get_transformed_size();
+                cursor.show();
+                await Scripting.sleep(50);
+                assert(button.menu.actor.width === menuWidth && delayRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
+                'Cursor toggle should shorten the slider without widening the menu or delay row');
+                const backgrounds = [];
+                for (const enabled of [false, true]) {
+                    settings.set_boolean('include-cursor', enabled);
+                    await waitUntil(() => cursor.checked === enabled,
+                        'Preferences cursor setting did not update the menu toggle');
+                    await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
+                    await Scripting.sleep(250);
+                    const background = cursor.get_theme_node().get_background_color();
+                    backgrounds.push([background.red, background.green, background.blue, background.alpha].join(','));
+                    assert(cursor.label_actor.text === `Capture mouse cursor: ${enabled ? 'on' : 'off'}`,
+                        'Cursor tooltip does not describe the current setting');
+                    await preview(`menu-${scheme}-cursor-${enabled ? 'on' : 'off'}.png`);
+                    await click(pointer, cursor);
+                    assert(settings.get_boolean('include-cursor') === !enabled && cursor.checked === !enabled,
+                        'Cursor toggle did not update the screenshot preference');
+                    assert(button.menu.isOpen && settings.get_int('capture-delay-ms') === delay,
+                        'Cursor toggle closed the menu or changed the delay');
+                    assert(button.menu.actor.width === menuWidth && delayRow.width === rowWidth,
+                        'Cursor toggle changed the menu boundaries');
+                }
+                assert(backgrounds[0] !== backgrounds[1], 'Cursor toggle has no visible checked state');
                 await preview(`menu-${scheme}.png`);
             }
         } finally {
@@ -259,11 +298,11 @@ export async function run() {
         pointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
         await Scripting.sleep(30);
         const delayControls = slider.get_parent().get_children().filter(actor => actor.visible);
-        assert(delayControls.length === 3 && delayControls[0] instanceof St.Icon &&
-            delayControls[1] === button._delayLabel && delayControls[2] === slider,
-        'Delay row should contain clock, time and slider');
+        assert(delayControls.length === 4 && delayControls[0] === button._cursorButton &&
+            delayControls[1] instanceof St.Icon && delayControls[2] === button._delayLabel && delayControls[3] === slider,
+        'Delay row should contain cursor toggle, clock, time and slider');
         const savedDelay = settings.get_int('capture-delay-ms');
-        for (const actor of delayControls.slice(0, 2)) {
+        for (const actor of delayControls.slice(1, 3)) {
             assert(!actor.reactive && !actor.can_focus, 'Clock and time must be read-only');
             await click(pointer, actor);
             await click(pointer, actor);
@@ -277,7 +316,7 @@ export async function run() {
         await Scripting.sleep(20);
         assert(Math.abs(button._delaySlider.value - 0.4) < 0.001 && button._delayTooltip.text === 'Screenshot delay: 1 s',
             'Preferences delay did not update the panel slider');
-        for (const [actor, name] of [[button._folderButton, 'folder'],
+        for (const [actor, name] of [[button._cursorButton, 'cursor'], [button._folderButton, 'folder'],
             [button._preferencesButton, 'preferences'], [slider, 'delay']]) {
             const [x, y] = actor.get_transformed_position();
             const [width, height] = actor.get_transformed_size();
@@ -303,7 +342,7 @@ export async function run() {
             extension.openPreferences = realOpenPreferences;
         }
         assert(!button.menu.isOpen, 'Preferences action left the menu open');
-        assert([button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
+        assert([button._cursorButton, button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
             'A tooltip remained visible after closing the menu');
         print('PASS: icon menu, preferences action and delay slider synchronization');
 

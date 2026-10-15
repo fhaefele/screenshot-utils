@@ -102,14 +102,32 @@ class CaptureButton extends PanelMenu.Button {
         delayRow.x_expand = true;
         delayRow.style = 'margin: 0 12px 9px;';
         rows.add_child(delayRow);
-        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon'}));
+        this._cursorButton = new St.Button({
+            style_class: 'button',
+            accessible_name: 'Capture mouse cursor',
+            toggle_mode: true,
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'border-radius: 4px; min-width: 0; min-height: 0; padding: 3px;',
+            child: new St.Icon({gicon: createCaptureIcon('cursor'), style_class: 'popup-menu-icon'}),
+        });
+        delayRow.add_child(this._cursorButton);
+        const cursorTooltip = this._addTooltip(this._cursorButton, 'Capture mouse cursor');
+        extension._settings.bind('include-cursor', this._cursorButton, 'checked', Gio.SettingsBindFlags.DEFAULT);
+        const syncCursorState = () => {
+            this._cursorButton.child.opacity = this._cursorButton.checked ? 255 : 128;
+            cursorTooltip.text = `Capture mouse cursor: ${this._cursorButton.checked ? 'on' : 'off'}`;
+        };
+        this._cursorButton.connect('notify::checked', syncCursorState);
+        syncCursorState();
+        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
+            y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
             style: 'min-width: 2.5em; text-align: right;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
         this._delaySlider.accessible_name = 'Screenshot delay';
-        this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
-        this._delaySlider.label_actor = this._delayTooltip;
+        this._delayTooltip = this._addTooltip(this._delaySlider, 'Screenshot delay');
         delayRow.add_child(this._delaySlider);
         const syncDelay = () => {
             const milliseconds = extension._settings.get_int('capture-delay-ms');
@@ -158,6 +176,7 @@ class CaptureButton extends PanelMenu.Button {
     }
 
     _addTooltip(actor, text) {
+        actor.track_hover = true;
         const tooltip = new MenuTooltip(actor, {text, style_class: 'screenshot-ui-tooltip', visible: false});
         actor.label_actor = tooltip;
         Main.uiGroup.add_child(tooltip);
