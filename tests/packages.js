@@ -6,10 +6,17 @@ import vm from 'node:vm';
 // Run separately after packing; ordinary unit tests need no GNOME tools.
 const metadata = JSON.parse(readFileSync('metadata.json', 'utf8'));
 const schema = readFileSync('schemas/org.gnome.shell.extensions.screenshot-utils.gschema.xml', 'utf8');
+const readme = readFileSync('README.md', 'utf8');
+const readmeImages = [...new Set([...readme.matchAll(/(?:src|srcset)="(assets\/[^"]+)"/g)]
+    .map(match => match[1]))];
 const supportedVersions = [];
 for (const target of ['legacy', 'modern']) {
     const archive = `dist/${target}/${metadata.uuid}.shell-extension.zip`;
     const contents = name => execFileSync('unzip', ['-p', archive, name], {encoding: 'utf8'});
+    assert.equal(contents('README.md'), readme);
+    for (const image of readmeImages)
+        assert.deepEqual(execFileSync('unzip', ['-p', archive, image]), readFileSync(image),
+            `Packaged README image must match ${image}`);
     const actual = JSON.parse(contents('metadata.json'));
     assert.deepEqual(actual, {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']});
     supportedVersions.push(...actual['shell-version']);

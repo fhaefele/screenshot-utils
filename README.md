@@ -2,7 +2,11 @@
 
 Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.04/26.04.
 
-![Screenshot Utils capture menu and preferences](https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/assets/screenshot-utils.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-utils-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshot-utils.png">
+  <img alt="Screenshot Utils capture menu and preferences" src="assets/screenshot-utils.png">
+</picture>
 
 - Selection, Screen and Window capture. Release a selection or choose a window from the thumbnail dialog to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
 - Stepped delay: 0-30 seconds. Exact seconds, save folder, filenames, mouse pointer, clipboard, sound and notifications in Preferences. Sound mute also applies to GNOME's native screenshots.
