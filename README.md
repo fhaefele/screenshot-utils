@@ -1,6 +1,6 @@
 # Screenshot Utils
 
-Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.04/26.04.
+Capture a selection, screen or window as a PNG in GNOME Shell 42-51 on Wayland.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-utils-dark.png">
@@ -8,70 +8,55 @@ Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.0
   <img alt="Screenshot Utils capture menu and preferences" src="assets/screenshot-utils.png">
 </picture>
 
-- Selection, Screen and Window capture. Release a selection or choose a window from the thumbnail dialog to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
-- Stepped delay: 0-30 seconds. Exact seconds, save folder, filenames, mouse pointer, clipboard, sound and notifications in Preferences. Sound mute also applies to GNOME's native screenshots.
-- PNGs saved to Pictures by default. Absolute, `~/` and home-relative paths supported; missing folders created. For delayed selections, move the pointer inside the area before capture.
+- Set a capture delay from 0 to 30 seconds in the menu.
+- Toggle mouse cursor capture with the cursor icon beside the clock. The theme accent means on; dimmed means off.
+- Choose the screenshot folder, filename template, clipboard, sound and notifications in Preferences. Screenshots save to Pictures by default. Muting the sound also mutes GNOME's own screenshots.
 
-Filename tokens: `{date}` = YYYY-MM-DD, `{time}` = HH-MM-SS, `{type}`/`{N}` = area/screen/window; `{Y}` `{m}` `{d}` = year/month/day, `{H}` `{M}` `{S}` = hour/minute/second. Preview updates when the template changes.
+Release a selection or choose a window to capture. Escape or right-click cancels.
 
 ## Install
 
 Download the matching ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest).
 
-Shell 42-44, including Ubuntu 22.04:
+GNOME Shell 42-44:
 
 ```sh
 gnome-extensions install --force screenshot-utils-gnome42-44.shell-extension.zip
 ```
 
-Shell 45-51:
+GNOME Shell 45-51:
 
 ```sh
 gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 ```
 
-After installing or updating, log out/in, then enable in Extensions. Build from source with `npm ci && npm run pack`; ZIPs written to `dist/legacy/` and `dist/modern/`. The legacy entry points are generated from the shared source.
+After installing or updating, log out and back in, then enable Screenshot Utils in Extensions.
 
 ## Keyboard shortcuts
 
-Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select Extension. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+Shortcuts start off. In Preferences, turn on **Enable keyboard shortcuts** and choose a **Source**. New setups select Extension.
 
-**GNOME keyboard settings** preserves existing custom shortcuts. Add a name, command and key in View and customize shortcuts → Custom shortcuts. Preferences provides copy buttons and opens Keyboard settings. Commands also work in a terminal:
+Choose **Extension** to assign keys in Preferences. They work globally outside Overview and Shell menus or dialogs, without confirmation. Occupied system shortcuts are rejected. External screenshot commands are disabled in this mode.
 
-```sh
-gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
-gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture screen
-gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
-```
+Choose **GNOME keyboard settings** to configure custom shortcuts under Keyboard settings → View and customize shortcuts → Custom shortcuts → Add. Copy the commands from Preferences.
 
-**Ask for every request** is on by default. When on, each screenshot command requires confirmation in GNOME Shell. When off, any local application can take screenshots by invoking the commands without confirmation. The switch takes effect immediately, with no setup dialog, and is saved across logins and Shell restarts. Changing it cancels pending command captures. Switching to Extension resets it to on. Notifications can be off without suppressing screenshot confirmation.
+**Ask for every request** applies to GNOME commands and starts on. When off, any local application can invoke the commands without confirmation. The choice persists across logins and restarts. Switching to Extension resets Ask to on. Unrestricted programs running as you can change these settings, including turning confirmation off.
 
-**Extension** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
+Turning shortcuts off cancels pending shortcut captures and keeps assignments. Print Screen stays unchanged.
 
-Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME keyboard settings. Turning command access off cancels pending command captures.
-
-## Test
+## Build and test
 
 ```sh
+npm ci
+npm run pack
 npm test
 npm run lint
-npm run test:gnome  # Shell 45-51
-npm run test:legacy # Shell 42-44
+npm run test:gnome  # GNOME Shell 45-51
+npm run test:legacy # GNOME Shell 42-44
 ```
 
-CI checks unit tests, syntax and schemas, builds both ZIPs, and runs the shared integration suite on Ubuntu 22.04 / Shell 42, Ubuntu 24.04 / Shell 46 and Ubuntu 26.04 / Shell 50. Other supported versions are validated locally with the same automated suite. Matching annotated version tags publish both packages using their tag notes. Shell tests run with isolated settings; `test:gnome` requires Shell 45-51, and `test:legacy` requires Shell 42-44.
-
-For manual testing, install the matching ZIP above, then:
-
-```sh
-sudo apt install mutter-dev-bin
-XDG_DATA_DIRS=/usr/local/share:/usr/share dbus-run-session -- gnome-shell --devkit --wayland
-```
-
-Inside the nested desktop: `gnome-extensions enable screenshot-utils@fxth.dev`. Check all capture modes, delay, cancellation, pointer, clipboard, sound, notifications and preferences. Test shortcut commands in its terminal; verify assigned keys in a normal GNOME session. Repack/reinstall and restart the nested Shell after changes. Shell 42-48 uses `--nested` instead of `--devkit`.
-
-Manually tested only on Shell 50.1. All supported Shell versions, 42-51, passed automated integration tests. Multiple monitors and fractional scaling need live testing. Manual nested testing uses your normal folders and preferences. Print Screen still opens GNOME's own screenshot UI.
+Packages are in `dist/legacy/` and `dist/modern/`. Shell tests use isolated settings. CI runs GNOME Shell 42, 46 and 50. Multiple monitors and fractional scaling still need manual testing.
 
 ## License
 
-GPL-3.0-or-later. Inspired by [Screenshot Tool](https://github.com/OttoAllmendinger/gnome-shell-screenshot) and [No Screenshot Box](https://github.com/abdallah-alkanani/no-screenshot-box). See [LICENSE](LICENSE).
+[GPL-3.0-or-later](LICENSE). Inspired by [Screenshot Tool](https://github.com/OttoAllmendinger/gnome-shell-screenshot) and [No Screenshot Box](https://github.com/abdallah-alkanani/no-screenshot-box).
