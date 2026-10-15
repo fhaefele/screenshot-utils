@@ -9,6 +9,7 @@ import {createEntryRow, createSwitchRow, selectFolder} from './prefs-compat.js';
 import {ensureSaveLocation, getSavePath} from './location.js';
 import {formatDelay, parseDelaySeconds} from './delay.js';
 import {fillShortcutPreferences} from './shortcut-prefs.js';
+import {addReleaseFooter} from './prefs-release.js';
 
 Gio.Resource.load(`${PKGDATADIR}/gnome-shell-icons.gresource`)._register();
 
@@ -27,6 +28,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         let closed = false;
         let folderRequest = null;
         let shortcutCleanup = null;
+        let releaseCleanup = null;
         ensureSaveLocation(settings);
         const page = new Adw.PreferencesPage({title: 'Capture', icon_name: 'camera-photo-symbolic'});
         const files = new Adw.PreferencesGroup({title: 'Files'});
@@ -83,6 +85,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
             closed = true;
             folderRequest?.cancel();
             shortcutCleanup?.();
+            releaseCleanup?.();
             for (const apply of applyEntries)
                 apply();
             // Focus controllers can emit leave during GTK disposal. Disconnect
@@ -148,6 +151,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         }
 
         shortcutCleanup = fillShortcutPreferences(window, page, settings, handlers);
+        releaseCleanup = addReleaseFooter(page, this.metadata);
         window.add(page);
         window.set_focus(browse);
     }

@@ -1,4 +1,5 @@
 import {buildFilename} from '../filename.js';
+import {releaseCacheFile} from '../prefs-release.js';
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -62,11 +63,28 @@ export async function checkPreferences(preferences) {
     settings.set_string('shortcut-setup', '');
     settings.set_boolean('shortcuts-enabled', false);
     settings.set_boolean('ask-command-confirmation', true);
+    const cache = releaseCacheFile(preferences.metadata.uuid);
+    const cacheExisted = cache.query_exists(null);
+    const previousCache = cacheExisted ? cache.load_contents(null)[1] : null;
+    GLib.mkdir_with_parents(cache.get_parent().get_path(), 0o700);
+    const fakeRelease = {tag: 'v999.0', shellVersions: Array.from({length: 10}, (_, index) => String(42 + index))};
+    cache.replace_contents(JSON.stringify({checkedAt: Date.now(), release: fakeRelease}), null, false,
+        Gio.FileCreateFlags.PRIVATE, null);
     const window = new Adw.PreferencesWindow();
 
     try {
         preferences.fillPreferencesWindow(window);
         const widgets = descendants(window);
+        assert(widgets.some(widget => widget instanceof Gtk.Label &&
+            widget.label === `Screenshot Utils v${preferences.metadata['version-name']}`), 'Installed release footer is missing');
+        const github = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.label === 'GitHub');
+        assert(github?.uri === 'https://github.com/fhaefele/screenshot-utils' && github.has_css_class('link'), 'GitHub footer link is incorrect');
+        const release = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.label === 'New release available');
+        await waitUntil(() => release?.visible, 'Cached release notice did not appear');
+        assert(release.has_css_class('link') && release.uri === 'https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0',
+            'Release notice does not open the matching release');
+        assert(!widgets.some(widget => widget instanceof Gtk.Button && widget.label === 'Update'),
+            'Preferences unexpectedly contain an installer button');
         assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,
             'Preferences contain an obsolete capture switch');
         const folder = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Screenshot folder');
@@ -315,6 +333,10 @@ export async function checkPreferences(preferences) {
         for (const [key, value] of previousBindings)
             settings.set_string(key, value);
         window.close();
+        if (cacheExisted)
+            cache.replace_contents(previousCache, null, false, Gio.FileCreateFlags.PRIVATE, null);
+        else
+            cache.delete(null);
     }
 
 }

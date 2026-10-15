@@ -24,7 +24,7 @@ export default [
         rules: {'no-restricted-imports': ['error', {patterns: ['gi://Gtk*', 'gi://Gdk', 'gi://Gdk?*', 'gi://Adw*', 'node:*']}]},
     },
     {
-        files: ['prefs.js', 'prefs-compat.js', 'shortcut-prefs.js'],
+        files: ['prefs.js', 'prefs-compat.js', 'shortcut-prefs.js', 'prefs-release.js'],
         rules: {'no-restricted-imports': ['error', {patterns: ['gi://Clutter*', 'gi://Meta*', 'gi://St', 'gi://St?*', 'gi://Shell*', 'node:*']}]},
     },
 ];

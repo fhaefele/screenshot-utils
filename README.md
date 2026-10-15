@@ -38,6 +38,8 @@ gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 
 After installing or updating, log out and back in, then enable Screenshot Utils in Extensions.
 
+Preferences shows the installed version and checks GitHub for compatible releases at most once every 24 hours when opened. The New release available link opens the release page; use the command above to update.
+
 ## Keyboard shortcuts
 
 Shortcuts start off. In Preferences, turn on **Enable keyboard shortcuts** and choose a **Source**. New setups select Extension.
