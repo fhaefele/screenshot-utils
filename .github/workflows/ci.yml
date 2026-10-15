@@ -6,12 +6,59 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect extension changes
+        id: filter
+        run: |
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';
+          import {appendFileSync, readFileSync} from 'node:fs';
+          const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const base = event.pull_request?.base.sha ?? event.before;
+          const head = event.pull_request?.head.sha ?? process.env.GITHUB_SHA;
+          let extension = true;
+          if (process.env.GITHUB_REF_TYPE !== 'tag' && base && !/^0+$/.test(base)) {
+              try {
+                  const range = `${base}${event.pull_request ? '...' : '..'}${head}`;
+                  const files = execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', range])
+                      .toString().split('\0').filter(Boolean);
+                  const documentation = file => file.endsWith('.md') || [
+                      'LICENSE', '.gitignore', 'assets/screenshot-utils.png', 'assets/screenshot-utils-dark.png',
+                  ].includes(file);
+                  extension = files.some(file => !documentation(file));
+              } catch (error) {
+                  console.warn(`Cannot determine changed files; running full CI: ${error.message}`);
+              }
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `extension=${extension}\n`);
+          console.log(extension ? 'Run build and GNOME tests' : 'Documentation only; skip build and GNOME tests');
+          JS
+
   build:
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+          (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -52,6 +99,11 @@ jobs:
           retention-days: 7
 
   integration:
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+          (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
     strategy:
       fail-fast: false
       matrix:
