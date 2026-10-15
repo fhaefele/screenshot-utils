@@ -136,7 +136,7 @@ class CaptureButton extends PanelMenu.Button {
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
         // Avoid fractional minimum widths losing pixels in older Shell layouts.
-        this._delaySlider.style = 'min-width: 48px;';
+        this._delaySlider.style = 'min-width: 48px; margin-left: 4px;';
         this._delaySlider.accessible_name = 'Screenshot delay';
         this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
         this._delaySlider.label_actor = this._delayTooltip;
