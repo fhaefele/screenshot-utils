@@ -42,16 +42,15 @@ export function addReleaseFooter(page, metadata, directory) {
     footer.append(new Gtk.Label({label: `Screenshot Utils v${metadata['version-name']}`,
         css_classes: ['dim-label', 'caption']}));
     footer.append(new Gtk.Label({label: '·', css_classes: ['dim-label', 'caption']}));
-    footer.append(new Gtk.Image({gicon: new Gio.FileIcon({file: directory.get_child('icons').get_child('github-symbolic.svg')}),
+    const repository = new Gtk.Box({spacing: 4});
+    repository.append(new Gtk.Image({gicon: new Gio.FileIcon({file: directory.get_child('icons').get_child('github-symbolic.svg')}),
         pixel_size: 16, valign: Gtk.Align.CENTER}));
-    const github = new Gtk.LinkButton({label: 'fhaefele/screenshot-utils', uri: REPOSITORY_URL});
-    github.update_property([Gtk.AccessibleProperty.LABEL], ['fhaefele/screenshot-utils on GitHub']);
-    github.add_css_class('caption');
-    footer.append(github);
+    repository.append(new Gtk.Label({use_markup: true,
+        label: `<a href="${REPOSITORY_URL}">fhaefele/screenshot-utils</a>`, css_classes: ['caption']}));
+    footer.append(repository);
     const separator = new Gtk.Label({label: '·', visible: false, css_classes: ['dim-label', 'caption']});
     footer.append(separator);
-    const available = new Gtk.LinkButton({label: 'New release available', visible: false, halign: Gtk.Align.CENTER});
-    available.add_css_class('caption');
+    const available = new Gtk.Label({label: 'latest:', use_markup: true, visible: false, css_classes: ['caption']});
     footer.append(available);
     group.add(footer);
     page.add(group);
@@ -82,8 +81,10 @@ export function addReleaseFooter(page, metadata, directory) {
             return fetchJSON(session, url, cancellable);
         },
         onResult: uri => {
-            if (uri)
-                available.uri = uri;
+            if (uri) {
+                const tag = GLib.markup_escape_text(uri.slice(uri.lastIndexOf('/') + 1), -1);
+                available.label = `<a href="${GLib.markup_escape_text(uri, -1)}">latest: ${tag}</a>`;
+            }
             available.visible = uri !== null;
             separator.visible = uri !== null;
         },

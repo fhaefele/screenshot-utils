@@ -77,18 +77,20 @@ export async function checkPreferences(preferences) {
         const widgets = descendants(window);
         assert(widgets.some(widget => widget instanceof Gtk.Label &&
             widget.label === `Screenshot Utils v${preferences.metadata['version-name']}`), 'Installed release footer is missing');
-        const github = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.uri === 'https://github.com/fhaefele/screenshot-utils');
-        assert(github?.label === 'fhaefele/screenshot-utils' && github.has_css_class('link'), 'GitHub footer link is incorrect');
-        assert(widgets.some(widget => widget instanceof Gtk.Image && widget.gicon instanceof Gio.FileIcon &&
-            widget.gicon.get_file().get_basename() === 'github-symbolic.svg' && widget.pixel_size === 16),
-        'Repository footer has no GitHub mark');
-        const release = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.label === 'New release available');
+        const github = widgets.find(widget => widget instanceof Gtk.Label && widget.get_text() === 'fhaefele/screenshot-utils');
+        assert(github?.use_markup && github.label.includes('href="https://github.com/fhaefele/screenshot-utils"'),
+            'Repository footer is not a native text link');
+        const mark = widgets.find(widget => widget instanceof Gtk.Image && widget.gicon instanceof Gio.FileIcon &&
+            widget.gicon.get_file().get_basename() === 'github-symbolic.svg' && widget.pixel_size === 16);
+        assert(mark?.get_parent() === github.get_parent(), 'GitHub mark is not grouped with the repository link');
+        const release = widgets.find(widget => widget instanceof Gtk.Label && widget.get_text().startsWith('latest:'));
         await waitUntil(() => release?.visible, 'Cached release notice did not appear');
-        assert(release.has_css_class('link') && release.uri === 'https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0',
-            'Release notice does not open the matching release');
-        assert(github.get_parent() === release.get_parent() &&
-            github.get_parent().orientation === Gtk.Orientation.HORIZONTAL &&
-            github.get_parent().halign === Gtk.Align.CENTER, 'Release footer is not a single centered line');
+        assert(release.use_markup && release.get_text() === 'latest: v999.0' &&
+            release.label.includes('href="https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0"'),
+            'Latest release is not a native text link to the matching release');
+        const footer = github.get_parent().get_parent();
+        assert(footer === release.get_parent() && footer.orientation === Gtk.Orientation.HORIZONTAL &&
+            footer.halign === Gtk.Align.CENTER, 'Release footer is not a single centered line');
         assert(!widgets.some(widget => widget instanceof Gtk.Button && widget.label === 'Update'),
             'Preferences unexpectedly contain an installer button');
         assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,
