@@ -14,12 +14,12 @@ const python = execFileSync('/bin/sh', ['-c', 'command -v python3'], {encoding: 
 function runInstaller({version = 'GNOME Shell 50.1', versionExit = 0, curlExit = 0,
     installExit = 0, uninstallExit = 0, settingsExit = 0, missingCurl = false, args = ['--yes'],
     installed = null, latest = '2.4', enabled = false, globallyDisabled = false,
-    answers = null, piped = false, badArchive = false, archiveUuid = uuid} = {}) {
+    answers = null, piped = false, badArchive = false, archiveUuid = uuid, dropWrites = false, emptyDataHome = false} = {}) {
     const root = mkdtempSync(join(tmpdir(), 'screenshot-utils installer-'));
     try {
         const bin = join(root, 'bin');
         const downloads = join(root, 'downloads');
-        const data = join(root, 'data');
+        const data = emptyDataHome ? join(root, 'home/.local/share') : join(root, 'data');
         const extension = join(data, 'gnome-shell/extensions', uuid);
         mkdirSync(bin);
         mkdirSync(downloads);
@@ -57,7 +57,7 @@ esac
 if os.environ['TEST_SETTINGS_EXIT'] != '0': sys.exit(1)
 p=os.environ['TEST_SETTINGS']; data=json.load(open(p))
 if sys.argv[1]=='get': print(repr(data[sys.argv[3]]).lower() if isinstance(data[sys.argv[3]],bool) else repr(data[sys.argv[3]]))
-else:
+elif os.environ['TEST_DROP_WRITES'] != 'true':
     data[sys.argv[3]]=ast.literal_eval(sys.argv[4])
     with open(p,'w') as f: json.dump(data,f)
 `, python);
@@ -77,17 +77,17 @@ exit "$TEST_CURL_EXIT"
             }
         }
         const env = {...process.env, PATH: missingCurl ? bin : `${bin}:${process.env.PATH}`,
-            XDG_DATA_HOME: data, XDG_CONFIG_HOME: join(root, 'config'), XDG_CACHE_HOME: join(root, 'cache'),
+            HOME: join(root, 'home'), XDG_DATA_HOME: emptyDataHome ? '' : data, XDG_CONFIG_HOME: join(root, 'config'), XDG_CACHE_HOME: join(root, 'cache'),
             TMPDIR: downloads, TEST_SHELL_VERSION: version, TEST_VERSION_EXIT: String(versionExit),
             TEST_CURL_EXIT: String(curlExit), TEST_INSTALL_EXIT: String(installExit), TEST_UNINSTALL_EXIT: String(uninstallExit),
-            TEST_SETTINGS_EXIT: String(settingsExit), TEST_SETTINGS: settingsPath, TEST_RELEASE: fixture,
+            TEST_DROP_WRITES: String(dropWrites), TEST_SETTINGS_EXIT: String(settingsExit), TEST_SETTINGS: settingsPath, TEST_RELEASE: fixture,
             TEST_CURL_ARGS: join(root, 'curl-args'), TEST_INSTALL_ARGS: join(root, 'install-args'),
             TEST_UNINSTALL_ARGS: join(root, 'uninstall-args'), TEST_RESET_ARGS: join(root, 'reset-args'), TEST_INSTALLER: installer};
         const interactive = answers !== null;
         const result = interactive
             ? spawnSync('script', ['-qefc', piped ? 'cat "$TEST_INSTALLER" | bash' : 'bash "$TEST_INSTALLER"', '/dev/null'],
                 {encoding: 'utf8', timeout: 10000, env, input: answers})
-            : spawnSync('/bin/bash', [installer, ...args], {encoding: 'utf8', timeout: 10000, env});
+            : spawnSync('/bin/bash', [installer, ...args], {encoding: 'utf8', timeout: 10000, env, detached: true});
         assert.ifError(result.error);
         const recorded = name => existsSync(join(root, name))
             ? readFileSync(join(root, name), 'utf8').trimEnd().split('\n') : null;
@@ -277,4 +277,25 @@ test('Quit and invalid menu choices change nothing', () => {
         assert.equal(result.resetArgs, null);
         assert.equal(result.curlArgs, null);
     }
+});
+
+test('Silent settings write failure cannot report enabling success', () => {
+    const result = runInstaller({dropWrites: true});
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /GNOME did not save extension settings/);
+    assert.doesNotMatch(result.stdout, /enabled for your next login/);
+    assert.deepEqual(result.settings['enabled-extensions'], ['other-enabled@test']);
+});
+test('Fallback uninstall keeps files when startup settings cannot be cleared', () => {
+    const result = runInstaller({installed: '2.4', enabled: true, uninstallExit: 1, dropWrites: true, answers: '4\ny\n'});
+    assert.notEqual(result.status, 0);
+    assert.equal(result.installedFiles, true);
+    assert.equal(result.resetArgs, null);
+    assert.deepEqual(result.settings['enabled-extensions'], ['other-enabled@test', uuid]);
+});
+test('Empty XDG_DATA_HOME uses the same default for detection and fallback uninstall', () => {
+    const result = runInstaller({installed: '2.4', enabled: true, uninstallExit: 1, emptyDataHome: true, answers: '4\ny\n\n'});
+    assert.equal(result.status, 0, result.output);
+    assert.equal(result.installedFiles, false);
+    assert.equal(result.resetArgs, null);
 });

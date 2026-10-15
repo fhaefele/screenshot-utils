@@ -101,7 +101,7 @@ try:
         elif action in ("enable", "disable", "remove", "uninstall"):
             if action == "uninstall":
                 directory = Path(args[0])
-                expected = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "gnome-shell/extensions" / uuid
+                expected = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "gnome-shell/extensions" / uuid
                 if directory != expected:
                     raise ValueError("Refusing to remove an unexpected directory")
             enabled = [item for item in enabled if item != uuid]
@@ -112,6 +112,8 @@ try:
                 disabled.append(uuid)
             for key, values in [("disabled-extensions", disabled), ("enabled-extensions", enabled)]:
                 subprocess.run(["gsettings", "set", "org.gnome.shell", key, json.dumps(values)], check=True)
+                if array(key) != values:
+                    raise ValueError("GNOME did not save extension settings")
             if action == "uninstall":
                 # rmtree does not follow nested symlinks; unlink a top-level symlink itself.
                 if directory.is_symlink():
