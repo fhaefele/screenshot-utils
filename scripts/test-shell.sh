@@ -43,6 +43,15 @@ dbus-run-session -- sh -eu -c '
     printf "Installing %s test package\n" "$SCREENSHOT_UTILS_TEST_TARGET"
     gnome-extensions install --force "dist/$SCREENSHOT_UTILS_TEST_TARGET/screenshot-utils@fxth.dev.shell-extension.zip"
     gsettings set org.gnome.shell enabled-extensions "[\"screenshot-utils@fxth.dev\"]"
+    if test "${SCREENSHOT_UTILS_TEST_SHELL_MODE:-user}" = ubuntu; then
+        # Exercise Yaru without unrelated bundled extensions racing our lifecycle tests.
+        disabled=$(node --input-type=module -e "
+            import {readFileSync} from \"node:fs\";
+            const mode = JSON.parse(readFileSync(\"/usr/share/gnome-shell/modes/ubuntu.json\", \"utf8\"));
+            process.stdout.write(JSON.stringify(mode.enabledExtensions ?? []));
+        ")
+        gsettings set org.gnome.shell disabled-extensions "$disabled"
+    fi
     gsettings set org.gnome.desktop.interface cursor-theme DMZ-White
     gsettings set org.gnome.shell welcome-dialog-last-shown-version "99"
     printf "Starting %s Shell integration suite\n" "$SCREENSHOT_UTILS_TEST_TARGET"

@@ -132,6 +132,11 @@ jobs:
       - run: npm run test:${{ matrix.test }}
         env:
           SCREENSHOT_UTILS_TEST_SHELL_MODE: ${{ matrix.mode }}
+      - name: Check Ubuntu theme
+        if: matrix.os == 'ubuntu-26.04'
+        run: npm run test:gnome
+        env:
+          SCREENSHOT_UTILS_TEST_SHELL_MODE: ubuntu
 
   release:
     if: github.ref_type == 'tag'

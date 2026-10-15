@@ -231,10 +231,31 @@ export async function run() {
                         `${actor.accessible_name} icon is clipped or resized: ${iconWidth}x${iconHeight}, expected ${iconSize}`);
                     assert(width >= iconSize + 6 && height >= iconSize + 6,
                         `${actor.accessible_name} button clips its icon`);
-                    assert(actor.has_style_class_name('button'), 'Capture control does not use native button styling');
+                    assert(['button', 'icon-button'].some(name => actor.has_style_class_name(name)),
+                        'Capture control does not use native button styling');
                     assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
                         'Switching color scheme changed capture control geometry');
                 });
+                const hoverGeometry = controls.map(actor => [...actor.get_transformed_position(), ...actor.get_transformed_size()]);
+                const checkHover = actor => {
+                    const node = actor.get_theme_node();
+                    const foreground = actor.child.get_theme_node().get_foreground_color();
+                    const background = node.get_background_color();
+                    assert(Math.abs(luminance(foreground) - luminance(background)) > 40 && foreground.alpha === 255,
+                        `${actor.accessible_name} icon loses contrast on hover or focus`);
+                    assert(controls.every((control, index) => [...control.get_transformed_position(), ...control.get_transformed_size()]
+                        .every((value, coordinate) => Math.abs(value - hoverGeometry[index][coordinate]) < 1)),
+                    'Hovering a control changes menu layout');
+                    assert(settings.get_boolean('include-cursor') === button._cursorButton.checked &&
+                        !extension._busy, 'Hovering changed cursor state or started a capture');
+                };
+                for (const actor of controls) {
+                    const [x, y] = actor.get_transformed_position();
+                    await movePointer(pointer, x + actor.width / 2, y + actor.height / 2);
+                    await waitUntil(() => actor.hover, 'Capture control did not receive hover');
+                    await Scripting.sleep(150);
+                    checkHover(actor);
+                }
                 const cursor = button._cursorButton;
                 const delayRow = button._delaySlider.get_parent();
                 const controlsRow = cursor.get_parent();
@@ -243,8 +264,8 @@ export async function run() {
                 const [clockWidth, clockHeight] = clock.get_transformed_size();
                 assert(cursorWidth === clockWidth && cursorHeight === clockHeight,
                     `Cursor and clock icons have different sizes: ${cursorWidth}x${cursorHeight} vs ${clockWidth}x${clockHeight}`);
-                const menuWidth = button.menu.actor.width;
-                const rowWidth = controlsRow.width;
+                const menuWidth = button.menu.actor.get_transformed_size()[0];
+                const rowWidth = controlsRow.get_transformed_size()[0];
                 const delay = settings.get_int('capture-delay-ms');
                 cursor.hide();
                 await Scripting.sleep(50);
@@ -252,7 +273,7 @@ export async function run() {
                 const baselineRowSize = controlsRow.get_transformed_size();
                 cursor.show();
                 await Scripting.sleep(50);
-                assert(button.menu.actor.width === menuWidth && controlsRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
+                assert(button.menu.actor.get_transformed_size()[0] === menuWidth && controlsRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
                 'Cursor toggle should shorten the slider without widening the menu or delay row');
                 const [cursorX, cursorY] = cursor.get_transformed_position();
                 const [selectionX, selectionY] = button._selectionButton.get_transformed_position();
@@ -295,17 +316,20 @@ export async function run() {
                     'Hovering the cursor highlights the delay controls or whole row');
                 await Scripting.sleep(150);
                 await preview(`hover-cursor-${scheme}.png`);
-                const [, sliderY] = button._delaySlider.get_transformed_position();
-                await movePointer(pointer, sliderX + button._delaySlider.width / 2,
-                    sliderY + button._delaySlider.height / 2);
-                await waitUntil(() => delayRow.hover && !cursor.hover && !controlsRow.active,
-                    'Delay hover did not stay separate from the cursor and outer row');
-                await Scripting.sleep(150);
-                assert(delayRow.get_theme_node().get_background_color().alpha === 0,
-                    'Hovering the delay controls shows a background highlight');
-                assert(delayActors.every((actor, index) =>
-                    colorKey(actor.get_theme_node().get_foreground_color()) === delayColors[index]),
-                'Hovering delay changes the clock or text color');
+                for (const target of [...delayActors, button._delaySlider]) {
+                    const [x, y] = target.get_transformed_position();
+                    await movePointer(pointer, x + target.width / 2, y + target.height / 2);
+                    await waitUntil(() => delayRow.hover && !cursor.hover && !controlsRow.active,
+                        'Delay hover did not stay separate from the cursor and outer row');
+                    await Scripting.sleep(150);
+                    assert(delayRow.get_theme_node().get_background_color().alpha === 0,
+                        'Hovering the delay controls shows a background highlight');
+                    assert(delayActors.every((actor, index) =>
+                        colorKey(actor.get_theme_node().get_foreground_color()) === delayColors[index]),
+                    'Hovering delay changes the clock or text color');
+                    assert(settings.get_int('capture-delay-ms') === delay,
+                        'Hovering delay controls changes the capture delay');
+                }
                 await preview(`hover-delay-${scheme}.png`);
                 const savedDelay = settings.get_int('capture-delay-ms');
                 const unitPositions = [];
@@ -323,6 +347,7 @@ export async function run() {
                 assert(Math.max(...unitPositions) - Math.min(...unitPositions) < 1,
                     `Delay unit moved when changing values: ${unitPositions.join(', ')}`);
                 const backgrounds = [];
+                const hoveredBackgrounds = [];
                 for (const enabled of [false, true]) {
                     settings.set_boolean('include-cursor', enabled);
                     await waitUntil(() => cursor.checked === enabled,
@@ -334,15 +359,33 @@ export async function run() {
                     assert(cursor.label_actor.text === `Capture mouse cursor: ${enabled ? 'on' : 'off'}`,
                         'Cursor tooltip does not describe the current setting');
                     await preview(`menu-${scheme}-cursor-${enabled ? 'on' : 'off'}.png`);
+                    await movePointer(pointer, cursorX + cursor.width / 2, cursorY + cursor.height / 2);
+                    await waitUntil(() => cursor.hover, 'Cursor control did not receive hover');
+                    for (const focus of [false, true]) {
+                        global.stage.set_key_focus(focus ? cursor : null);
+                        await Scripting.sleep(200);
+                        checkHover(cursor);
+                        assert(cursor.opacity === (enabled ? 255 : 128), 'Hover changes cursor toggle opacity');
+                        assert(cursor.get_theme_node().get_background_color().alpha === 255,
+                            'Cursor hover or focus removes its solid state background');
+                        assert(cursor.checked === enabled && settings.get_int('capture-delay-ms') === delay,
+                            'Hover or focus changes cursor capture or screenshot delay');
+                        await preview(`hover-${scheme}-cursor-${enabled ? 'on' : 'off'}-focus-${focus}.png`);
+                    }
+                    hoveredBackgrounds.push(colorKey(cursor.get_theme_node().get_background_color()));
+                    global.stage.set_key_focus(null);
                     await click(pointer, cursor);
                     assert(settings.get_boolean('include-cursor') === !enabled && cursor.checked === !enabled,
                         'Cursor toggle did not update the screenshot preference');
                     assert(button.menu.isOpen && settings.get_int('capture-delay-ms') === delay,
                         'Cursor toggle closed the menu or changed the delay');
-                    assert(button.menu.actor.width === menuWidth && controlsRow.width === rowWidth,
-                        'Cursor toggle changed the menu boundaries');
+                    await Scripting.waitLeisure();
+                    assert(button.menu.actor.get_transformed_size()[0] === menuWidth && controlsRow.get_transformed_size()[0] === rowWidth,
+                        `Cursor toggle changed the menu boundaries: menu ${menuWidth}/${button.menu.actor.get_transformed_size()[0]}, ` +
+                        `row ${rowWidth}/${controlsRow.get_transformed_size()[0]}, checked ${cursor.checked}`);
                 }
-                assert(backgrounds[0] !== backgrounds[1], 'Cursor toggle has no visible checked state');
+                assert(backgrounds[0] !== backgrounds[1] && hoveredBackgrounds[0] !== hoveredBackgrounds[1],
+                    'Cursor toggle loses its visible checked state on hover');
                 await preview(`menu-${scheme}.png`);
             }
         } finally {
