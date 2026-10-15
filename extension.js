@@ -105,7 +105,7 @@ class CaptureButton extends PanelMenu.Button {
             reactive: true,
             x_expand: true,
             style_class: 'popup-inactive-menu-item',
-            style: `padding: 0 0 0 ${menuPadding}px; spacing: 4px;`,
+            style: 'padding: 0; spacing: 4px;',
         });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
         for (const row of [menuRow, captureRow, controlsRow])
@@ -135,6 +135,8 @@ class CaptureButton extends PanelMenu.Button {
             style: 'min-width: 2.5em; text-align: right;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
+        // Avoid fractional minimum widths losing pixels in older Shell layouts.
+        this._delaySlider.style = 'min-width: 48px;';
         this._delaySlider.accessible_name = 'Screenshot delay';
         this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
         this._delaySlider.label_actor = this._delayTooltip;

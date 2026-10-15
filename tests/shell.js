@@ -251,8 +251,9 @@ export async function run() {
                 const [sliderX] = button._delaySlider.get_transformed_position();
                 assert(Math.abs(cursorX - selectionX) < 1,
                     'Cursor toggle is not aligned with the selection button');
-                assert(delayX > cursorX + cursor.width && clockX > delayX,
-                    'Cursor-to-clock spacing lost its gap or leading padding');
+                assert(delayX > cursorX + cursor.width && clockX >= delayX &&
+                    clockX - cursorX - cursor.width <= 8,
+                'Cursor and clock need a small, non-overlapping gap');
                 const [labelX] = button._delayLabel.get_transformed_position();
                 assert(labelX - clockX - clockWidth <= 4 && labelX >= clockX + clockWidth,
                     'Clock and delay text are too far apart or overlap');
