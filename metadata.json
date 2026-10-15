@@ -2,7 +2,7 @@
   "uuid": "screenshot-utils@fxth.dev",
   "name": "Screenshot Utils",
   "description": "Fast screenshots with GNOME Shell capture, delay, naming and follow-up actions. Optionally copies screenshot images to the clipboard; preferences can copy shortcut commands. Shortcuts are off by default. Choose GNOME custom shortcuts or extension-managed keys. Commands require confirmation by default. Turning off 'Ask for every request' lets any local application request screenshots without confirmation; this choice is saved across logins and restarts. Unrestricted local programs can modify saved permissions.",
-  "version-name": "2.3.1",
+  "version-name": "2.3.2",
   "url": "https://github.com/fhaefele/screenshot-utils",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "settings-schema": "org.gnome.shell.extensions.screenshot-utils"

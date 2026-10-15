@@ -16,7 +16,13 @@ Release a selection or choose a window to capture. Escape or right-click cancels
 
 ## Install
 
-Download the matching ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest).
+Install or update to the latest release for your GNOME version with one command. Requires Bash, curl and GNOME's extension tools. Installs for the current user without sudo.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/scripts/install.sh | bash
+```
+
+Or download the matching ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest).
 
 GNOME Shell 42-44:
 
