@@ -151,7 +151,7 @@ export default class ScreenshotUtilsPreferences extends ExtensionPreferences {
         }
 
         shortcutCleanup = fillShortcutPreferences(window, page, settings, handlers);
-        releaseCleanup = addReleaseFooter(page, this.metadata);
+        releaseCleanup = addReleaseFooter(page, this.metadata, this.dir);
         window.add(page);
         window.set_focus(browse);
     }

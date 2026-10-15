@@ -36,13 +36,16 @@ async function fetchJSON(session, url, cancellable) {
     }
 }
 
-export function addReleaseFooter(page, metadata) {
+export function addReleaseFooter(page, metadata, directory) {
     const group = new Adw.PreferencesGroup();
     const footer = new Gtk.Box({spacing: 6, halign: Gtk.Align.CENTER});
     footer.append(new Gtk.Label({label: `Screenshot Utils v${metadata['version-name']}`,
         css_classes: ['dim-label', 'caption']}));
     footer.append(new Gtk.Label({label: '·', css_classes: ['dim-label', 'caption']}));
-    const github = new Gtk.LinkButton({label: 'GitHub', uri: REPOSITORY_URL});
+    footer.append(new Gtk.Image({gicon: new Gio.FileIcon({file: directory.get_child('icons').get_child('github-symbolic.svg')}),
+        pixel_size: 16, valign: Gtk.Align.CENTER}));
+    const github = new Gtk.LinkButton({label: 'fhaefele/screenshot-utils', uri: REPOSITORY_URL});
+    github.update_property([Gtk.AccessibleProperty.LABEL], ['fhaefele/screenshot-utils on GitHub']);
     github.add_css_class('caption');
     footer.append(github);
     const separator = new Gtk.Label({label: '·', visible: false, css_classes: ['dim-label', 'caption']});

@@ -77,8 +77,11 @@ export async function checkPreferences(preferences) {
         const widgets = descendants(window);
         assert(widgets.some(widget => widget instanceof Gtk.Label &&
             widget.label === `Screenshot Utils v${preferences.metadata['version-name']}`), 'Installed release footer is missing');
-        const github = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.label === 'GitHub');
-        assert(github?.uri === 'https://github.com/fhaefele/screenshot-utils' && github.has_css_class('link'), 'GitHub footer link is incorrect');
+        const github = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.uri === 'https://github.com/fhaefele/screenshot-utils');
+        assert(github?.label === 'fhaefele/screenshot-utils' && github.has_css_class('link'), 'GitHub footer link is incorrect');
+        assert(widgets.some(widget => widget instanceof Gtk.Image && widget.gicon instanceof Gio.FileIcon &&
+            widget.gicon.get_file().get_basename() === 'github-symbolic.svg' && widget.pixel_size === 16),
+        'Repository footer has no GitHub mark');
         const release = widgets.find(widget => widget instanceof Gtk.LinkButton && widget.label === 'New release available');
         await waitUntil(() => release?.visible, 'Cached release notice did not appear');
         assert(release.has_css_class('link') && release.uri === 'https://github.com/fhaefele/screenshot-utils/releases/tag/v999.0',

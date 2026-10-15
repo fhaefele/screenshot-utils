@@ -15,12 +15,13 @@ for (const target of ['legacy', 'modern']) {
     const contents = name => execFileSync('unzip', ['-p', archive, name], {encoding: 'utf8'});
     const files = execFileSync('unzip', ['-Z1', archive], {encoding: 'utf8'})
         .trim().split('\n').filter(name => !name.endsWith('/'));
-    const expectedFiles = ['metadata.json', 'extension.js', 'prefs.js', 'LICENSE',
+    const expectedFiles = ['metadata.json', 'extension.js', 'prefs.js', 'LICENSE', 'icons/github-symbolic.svg',
         'schemas/org.gnome.shell.extensions.screenshot-utils.gschema.xml',
         ...(target === 'legacy' ? ['schemas/gschemas.compiled'] : modernModules)];
     assert.deepEqual(files.sort(), expectedFiles.sort(),
         'Upload packages must contain only runtime files, schemas and the license');
     assert.equal(contents('LICENSE'), license);
+    assert.equal(contents('icons/github-symbolic.svg'), readFileSync('icons/github-symbolic.svg', 'utf8'));
     const actual = JSON.parse(contents('metadata.json'));
     assert.deepEqual(actual, {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']});
     supportedVersions.push(...actual['shell-version']);
