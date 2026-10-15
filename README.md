@@ -2,7 +2,11 @@
 
 Native screenshots for GNOME Shell 42-51 on Wayland, including Ubuntu 22.04/24.04/26.04.
 
-![Screenshot Utils capture menu and preferences](https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/assets/screenshot-utils.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-utils-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshot-utils.png">
+  <img alt="Screenshot Utils capture menu and preferences" src="assets/screenshot-utils.png">
+</picture>
 
 - Selection, Screen and Window capture. Release a selection or choose a window from the thumbnail dialog to capture after the chosen delay. Escape/right-click cancels; a selection click without dragging also cancels.
 - Stepped delay: 0-30 seconds. Exact seconds, save folder, filenames, mouse pointer, clipboard, sound and notifications in Preferences. Sound mute also applies to GNOME's native screenshots.
@@ -30,7 +34,9 @@ After installing or updating, log out/in, then enable in Extensions. Build from 
 
 ## Keyboard shortcuts
 
-Preferences → Keyboard Shortcuts shows commands with copy icons and opens Keyboard Settings. First enable **Allow shortcut commands**. This is off by default. Each command requires confirmation in GNOME Shell, even with notifications off. Turning access off cancels pending command captures; turning it back on requires a new request and confirmation. In View and Customize Shortcuts → Custom Shortcuts, add a name, paste the command and choose a key. Commands also work in a terminal:
+Shortcuts are off by default. Turn on **Enable keyboard shortcuts**, then choose **GNOME keyboard settings** or **Extension** under **Source**. New setups select Extension. Turning the switch off cancels pending shortcut captures and preserves the configuration. Panel buttons remain available.
+
+**GNOME keyboard settings** preserves existing custom shortcuts. Add a name, command and key in View and customize shortcuts → Custom shortcuts. Preferences provides copy buttons and opens Keyboard settings. Commands also work in a terminal:
 
 ```sh
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture selection
@@ -38,7 +44,11 @@ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/exten
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/screenshotutils --method dev.fxth.ScreenshotUtils.Capture window
 ```
 
-GNOME stores the shortcuts across logins and handles conflicts. Commands require this extension enabled and use its capture preferences; local session-bus clients can call them. Captures respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it.
+**Ask for every request** is on by default. When on, each screenshot command requires confirmation in GNOME Shell. When off, any local application can take screenshots by invoking the commands without confirmation. The switch takes effect immediately, with no setup dialog, and is saved across logins and Shell restarts. Changing it cancels pending command captures. Switching to Extension resets it to on. Notifications can be off without suppressing screenshot confirmation.
+
+**Extension** provides Selection, Screen and Window key recorders with Clear buttons. Keys start unassigned and activate immediately after assignment, without approval dialogs. They work again after login/restart while the master switch stays on. GNOME reserves the combinations globally; occupied combinations are rejected without replacing previous assignments or other system shortcuts. External screenshot commands are disabled in this mode. Switching modes preserves assignments; existing GNOME custom shortcuts remain untouched and may occupy combinations.
+
+Captures use the extension's preferences and respect GNOME's disk-saving restrictions. Print Screen stays unchanged unless you explicitly reassign it in GNOME keyboard settings. Turning command access off cancels pending command captures.
 
 ## Test
 

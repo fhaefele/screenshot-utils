@@ -75,7 +75,7 @@ jobs:
       - name: Install GNOME test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gnome-shell gnome-shell-extension-prefs gjs zip unzip xvfb xauth dmz-cursor-theme yaru-theme-gnome-shell librsvg2-common libgl1-mesa-dri gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0
+          sudo apt-get install -y --no-install-recommends gnome-shell gnome-shell-extension-prefs dconf-gsettings-backend dconf-service gjs zip unzip xvfb xauth dmz-cursor-theme yaru-theme-gnome-shell librsvg2-common libgl1-mesa-dri gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0
       - run: npm ci
       - run: npm run test:${{ matrix.test }}
         env:

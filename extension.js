@@ -21,6 +21,8 @@ import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 import {createCaptureIcon} from './capture-icons.js';
+import {ShortcutManager} from './shortcut-manager.js';
+import {CAPTURE_BUS_PATH, resetCommandPreferences} from './shortcuts.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
@@ -29,6 +31,7 @@ const CAPTURE_INTERFACE = `<node>
         <method name="Capture">
             <arg type="s" name="mode" direction="in"/>
         </method>
+        <property name="Available" type="b" access="read"/>
     </interface>
 </node>`;
 
@@ -55,6 +58,7 @@ class CaptureButton extends PanelMenu.Button {
         this._extension = extension;
         this.add_child(new St.Icon({icon_name: 'camera-photo-symbolic', style_class: 'system-status-icon'}));
 
+        const menuPadding = 12;
         const menuRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         menuRow.style = 'padding: 0;';
         const rows = new St.Widget({
@@ -67,6 +71,7 @@ class CaptureButton extends PanelMenu.Button {
         this.menu.addMenuItem(menuRow);
         const captureRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         captureRow.x_expand = true;
+        captureRow.style = `padding: ${menuPadding}px ${menuPadding}px 6px;`;
         rows.add_child(captureRow);
         const captures = new St.Widget({
             x_expand: true,
@@ -95,18 +100,50 @@ class CaptureButton extends PanelMenu.Button {
         this._preferencesButton = this._addIconButton(tools, 'emblem-system-symbolic',
             'Preferences', () => extension._openPreferences(), true);
 
-        const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false});
+        const controlsRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        controlsRow.x_expand = true;
+        controlsRow.style = `margin: 0 0 ${menuPadding}px; padding: 0 ${menuPadding}px;`;
+        rows.add_child(controlsRow);
+        const delayRow = new St.BoxLayout({
+            reactive: true,
+            x_expand: true,
+            style_class: 'popup-inactive-menu-item',
+            style: 'padding: 0; spacing: 0;',
+        });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
-        for (const row of [menuRow, captureRow, delayRow])
+        for (const row of [menuRow, captureRow, controlsRow])
             row._ornamentLabel?.hide();
-        delayRow.x_expand = true;
-        delayRow.style = 'margin: 0 12px 9px;';
-        rows.add_child(delayRow);
-        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon'}));
+        this._cursorButton = new St.Button({
+            style_class: 'button',
+            accessible_name: 'Capture mouse cursor',
+            toggle_mode: true,
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'border-radius: 4px; min-width: 0; min-height: 0; padding: 3px;',
+            child: new St.Icon({gicon: createCaptureIcon('cursor'), style_class: 'popup-menu-icon'}),
+        });
+        controlsRow.add_child(this._cursorButton);
+        const cursorTooltip = this._addTooltip(this._cursorButton, 'Capture mouse cursor');
+        extension._settings.bind('include-cursor', this._cursorButton, 'checked', Gio.SettingsBindFlags.DEFAULT);
+        const syncCursorState = () => {
+            if (this._cursorButton.checked)
+                this._cursorButton.add_style_class_name('default');
+            else
+                this._cursorButton.remove_style_class_name('default');
+            this._cursorButton.opacity = this._cursorButton.checked ? 255 : 128;
+            cursorTooltip.text = `Capture mouse cursor: ${this._cursorButton.checked ? 'on' : 'off'}`;
+        };
+        this._cursorButton.connect('notify::checked', syncCursorState);
+        syncCursorState();
+        controlsRow.add_child(delayRow);
+        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
+            y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
             style: 'min-width: 2.5em; text-align: right;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
+        // Avoid fractional minimum widths losing pixels in older Shell layouts.
+        this._delaySlider.style = 'min-width: 48px; margin-left: 4px;';
         this._delaySlider.accessible_name = 'Screenshot delay';
         this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
         this._delaySlider.label_actor = this._delayTooltip;
@@ -146,7 +183,7 @@ class CaptureButton extends PanelMenu.Button {
             x_expand: true,
             style: utility
                 ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
-                : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
+                : 'border-radius: 8px; min-width: 0; padding: 8px;',
             child: new St.Icon({...(typeof icon === 'string' ? {icon_name: icon} : {gicon: icon}),
                 icon_size: utility ? 16 : 32,
                 x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}),
@@ -158,6 +195,7 @@ class CaptureButton extends PanelMenu.Button {
     }
 
     _addTooltip(actor, text) {
+        actor.track_hover = true;
         const tooltip = new MenuTooltip(actor, {text, style_class: 'screenshot-ui-tooltip', visible: false});
         actor.label_actor = tooltip;
         Main.uiGroup.add_child(tooltip);
@@ -193,21 +231,15 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
         this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
+        if (this._settings.get_string('shortcut-setup') === 'extension')
+            resetCommandPreferences(this._settings);
         this._commandDialog = null;
-        this._commandPermissionChangedId = this._settings.connect('changed::enable-shortcut-commands', () => {
-            // External false→true changes may be queued together. The current
-            // value cannot prove that an approved request stayed authorized.
-            this._run.commandEpoch++;
-            this._cancelCommandDialog();
-            if (this._selector && this._selector.command !== null)
-                this._cancelSelector();
-            if (this._windowSession && this._windowSession.command !== null)
-                this._cancelWindowUi();
-            for (const cancel of this._run.pending) {
-                if (cancel.command !== null)
-                    cancel();
-            }
-        });
+        this._commandSettingIds = ['shortcuts-enabled', 'ask-command-confirmation', 'shortcut-setup']
+            .map(key => this._settings.connect(`changed::${key}`, () => {
+                if (key === 'shortcut-setup' && this._settings.get_string(key) === 'extension')
+                    resetCommandPreferences(this._settings);
+                this._invalidateCommandRequests();
+            }));
         this._busy = false;
         this._selector = null;
         this._windowSession = null;
@@ -216,17 +248,31 @@ export default class ScreenshotUtilsExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._button);
         this._injectionManager = new InjectionManager();
         this._patchScreenshotSound();
+        this._shortcuts = new ShortcutManager(this._settings, mode => {
+            const command = {native: this._shortcuts, epoch: this._shortcuts.epoch};
+            this._captureMode(mode, command).catch(error => this._notify(`Screenshot failed: ${error.message}`));
+        }, () => this._cancelCapturesMatching(command => command?.native === this._shortcuts));
+        this._shortcuts.enable();
+        const extension = this;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
+            get Available() { return !!extension._run; },
         });
-        this._dbus.export(Gio.DBus.session, '/org/gnome/shell/extensions/screenshotutils');
+        this._dbus.export(Gio.DBus.session, CAPTURE_BUS_PATH);
+        this._dbus.emit_property_changed('Available', new GLib.Variant('b', true));
     }
 
     disable() {
         const run = this._run;
         this._run = null;
+        this._dbus?.emit_property_changed('Available', new GLib.Variant('b', false));
+        // Property changes are queued; deliver stopped state before unexport
+        // so open preferences can track lock/unlock and runtime restarts.
+        this._dbus?.flush();
         this._dbus?.unexport();
         this._dbus = null;
+        this._shortcuts?.destroy();
+        this._shortcuts = null;
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
@@ -244,9 +290,9 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._button = null;
         if (this._locationChangedId)
             this._settings.disconnect(this._locationChangedId);
-        if (this._commandPermissionChangedId)
-            this._settings.disconnect(this._commandPermissionChangedId);
-        this._commandPermissionChangedId = 0;
+        for (const id of this._commandSettingIds ?? [])
+            this._settings.disconnect(id);
+        this._commandSettingIds = null;
         this._locationChangedId = 0;
         this._settings = null;
         this._lockdownSettings = null;
@@ -260,9 +306,36 @@ export default class ScreenshotUtilsExtension extends Extension {
 
     _checkCommandAllowed(run, command) {
         this._checkActive(run);
+        if (command?.native) {
+            if (command.native !== this._shortcuts || command.epoch !== this._shortcuts.epoch ||
+                !this._shortcuts.active)
+                throw new Error('Screenshot shortcut permission was revoked');
+            return;
+        }
         if (command !== null && (command !== run.commandEpoch ||
-            !this._settings.get_boolean('enable-shortcut-commands')))
+            this._settings.get_string('shortcut-setup') !== 'gnome' ||
+            !this._settings.get_boolean('shortcuts-enabled')))
             throw new Error('Screenshot command permission was revoked');
+    }
+
+    _invalidateCommandRequests() {
+        if (!this._run)
+            return;
+        // A queued off/on notification still cancels the old request.
+        this._run.commandEpoch++;
+        this._cancelCommandDialog();
+        this._cancelCapturesMatching(command => typeof command === 'number');
+    }
+
+    _cancelCapturesMatching(matches) {
+        if (this._selector && matches(this._selector.command))
+            this._cancelSelector();
+        if (this._windowSession && matches(this._windowSession.command))
+            this._cancelWindowUi();
+        for (const cancel of this._run?.pending ?? []) {
+            if (matches(cancel.command))
+                cancel();
+        }
     }
 
     _checkCaptureAllowed(run, command = null) {
@@ -271,39 +344,54 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Screenshot controls are unavailable');
         if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
             throw new Error('Saving screenshots is disabled by system policy');
+        if (command !== null) {
+            const ownModals = Number(this._button?.menu.isOpen ?? false) +
+                Number(this._commandDialog?._hasModal ?? false) +
+                Number(this._windowSession?._hasModal ?? false) +
+                Number(this._selector?._grabHelper.grabbed ?? false);
+            if (Main.modalCount > ownModals)
+                throw new Error('Screenshot controls are unavailable');
+        }
     }
 
     _requestCapture(mode, invocation) {
-        if (!this._settings?.get_boolean('enable-shortcut-commands')) {
+        if (!this._settings?.get_boolean('shortcuts-enabled') ||
+            this._settings.get_string('shortcut-setup') !== 'gnome') {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Enable Allow shortcut commands in Screenshot Utils preferences first');
+                'Use GNOME keyboard settings mode and enable keyboard shortcuts in preferences first');
             return;
         }
         if (!['selection', 'screen', 'window'].includes(mode)) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.InvalidMode', 'Use selection, screen or window');
             return;
         }
-        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
+        if (this._requestBlocked(invocation))
             return;
-        }
-        if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
-            Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
-            return;
-        }
-        if (this._lockdownSettings.get_boolean('disable-save-to-disk')) {
-            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Saving screenshots is disabled by system policy');
-            return;
-        }
         const run = this._run;
         this._runCommand(mode, run, run.commandEpoch).catch(error => {
             if (this._run === run)
                 this._notify(`Screenshot failed: ${error.message}`);
         });
-        // Reply immediately; Shell requires a user gesture for each command.
+        // Reply immediately so the custom shortcut does not wait for capture.
         invocation.return_value(null);
+    }
+
+    _requestBlocked(invocation) {
+        if (this._busy || this._selector || this._windowSession || this._commandDialog) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Busy', 'A screenshot is already in progress');
+            return true;
+        }
+        if (!this._run || Main.sessionMode.isLocked || Main.sessionMode.isGreeter ||
+            Main.modalCount > (this._button.menu.isOpen ? 1 : 0)) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable', 'Screenshot controls are unavailable');
+            return true;
+        }
+        if (this._lockdownSettings.get_boolean('disable-save-to-disk')) {
+            invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
+                'Saving screenshots is disabled by system policy');
+            return true;
+        }
+        return false;
     }
 
     async _runCommand(mode, run, command) {
@@ -313,29 +401,35 @@ export default class ScreenshotUtilsExtension extends Extension {
         try {
             await this._prepareCapture(run, command);
             this._checkCaptureAllowed(run, command);
-            dialog = new CommandConfirmation();
-            this._commandDialog = dialog;
-            const choice = new Promise(resolve => {
-                dialog.connect('destroy', () => resolve(false));
-                dialog.populate(mode, choice => {
-                    dialog.cancelled ||= !choice;
-                    resolve(choice);
+            allowed = !this._settings.get_boolean('ask-command-confirmation');
+            if (!allowed) {
+                dialog = new CommandConfirmation();
+                this._commandDialog = dialog;
+                const choice = new Promise(resolve => {
+                    dialog.connect('destroy', () => resolve(false));
+                    dialog.populate(mode, allowed => {
+                        dialog.cancelled ||= !allowed;
+                        resolve(allowed);
+                    });
                 });
-            });
-            if (!dialog.open())
-                throw new Error('Could not grab screenshot confirmation input');
-            allowed = await choice;
-            await this._wait(0, run, null, null, null, command);
-            this._checkCaptureAllowed(run, command);
-            allowed &&= !dialog.cancelled;
+                if (!dialog.open())
+                    throw new Error('Could not grab screenshot confirmation input');
+                allowed = await choice;
+                await this._wait(0, run, null, null, null, command);
+                this._checkCaptureAllowed(run, command);
+                allowed &&= !dialog.cancelled;
+            }
         } finally {
             if (this._commandDialog === dialog)
                 this._cancelCommandDialog();
             if (this._run === run)
                 this._busy = false;
         }
-        if (!allowed)
-            return;
+        if (allowed)
+            await this._captureMode(mode, command);
+    }
+
+    async _captureMode(mode, command = null) {
         if (mode === 'selection')
             await this._selectArea(command);
         else if (mode === 'window')
@@ -456,7 +550,7 @@ export default class ScreenshotUtilsExtension extends Extension {
             selector.add_child(hint);
             hint.add_constraint(new Clutter.BindConstraint({source: selector, coordinate: Clutter.BindCoordinate.ALL}));
             hint.set_child(new St.Label({
-                text: 'Esc or right-click to cancel',
+                text: 'Escape or right-click to cancel',
                 style_class: 'screenshot-ui-tooltip',
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.END,

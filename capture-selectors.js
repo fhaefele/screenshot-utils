@@ -6,6 +6,7 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import {SelectArea} from 'resource:///org/gnome/shell/ui/screenshot.js';
 import {connectSecondaryClick} from './shell-compat.js';
@@ -68,14 +69,19 @@ export const CommandConfirmation = GObject.registerClass(
 class CommandConfirmation extends CaptureDialog {
     populate(mode, onChoice) {
         const subject = {screen: 'your entire screen', selection: 'a selected area', window: 'a selected window'}[mode];
-        this.contentLayout.add_child(new St.Label({text: 'Allow screenshot command?', style_class: 'headline'}));
-        const description = new St.Label({text: `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`});
-        description.clutter_text.line_wrap = true;
-        this.contentLayout.add_child(description);
+        const content = new Dialog.MessageDialogContent({
+            title: 'Allow screenshot command?',
+            description: `A local application requested a screenshot of ${subject}.\nIt may access the saved image. Allow this request?`,
+        });
+        const title = content.get_first_child().clutter_text;
+        title.line_wrap = true;
+        title.ellipsize = Pango.EllipsizeMode.NONE;
+        this.contentLayout.add_child(content);
         this._cancelButton = this.addButton({label: 'Cancel', action: () => onChoice(false), key: Clutter.KEY_Escape});
         this._allowButton = this.addButton({label: 'Allow', action: () => onChoice(true)});
         this.setInitialKeyFocus(this._cancelButton);
     }
+
 });
 
 export const WindowPicker = GObject.registerClass(
@@ -96,7 +102,7 @@ class WindowPicker extends CaptureDialog {
         const monitor = Main.layoutManager.currentMonitor;
         const columns = Math.max(1, Math.min(4, Math.floor(monitor.width * 0.75 / 240)));
         this.contentLayout.add_child(new St.Label({text: 'Choose a window', style_class: 'headline'}));
-        this.contentLayout.add_child(new St.Label({text: 'Esc or right-click to cancel', style_class: 'dim-label'}));
+        this.contentLayout.add_child(new St.Label({text: 'Escape or right-click to cancel', style_class: 'dim-label'}));
         const scroll = new St.ScrollView({
             hscrollbar_policy: St.PolicyType.NEVER,
             vscrollbar_policy: St.PolicyType.AUTOMATIC,

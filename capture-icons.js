@@ -5,6 +5,7 @@ const names = Object.freeze({
     selection: 'screenshot-ui-area-symbolic',
     screen: 'screenshot-ui-display-symbolic',
     window: 'screenshot-ui-window-symbolic',
+    cursor: 'screenshot-ui-show-pointer-symbolic',
 });
 
 export function createCaptureIcon(mode) {

@@ -26,7 +26,8 @@ export XDG_RUNTIME_DIR="$test_root/runtime"
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 export XDG_DATA_DIRS=/usr/local/share:/usr/share
-export GSETTINGS_BACKEND=keyfile
+# Shell and preferences write concurrently; dconf preserves unrelated updates.
+export GSETTINGS_BACKEND=dconf
 if test "$target" = legacy; then
     export GJS_PATH="$PWD/dist/tests"
     export SHELL_PERF_MODULE=screenshotUtils
@@ -35,7 +36,7 @@ fi
 export MUTTER_WM_CLASS_FILTER=Gnome-shell-perf-helper,org.gnome.Shell.Extensions
 export LIBGL_ALWAYS_SOFTWARE=1
 export GIO_USE_VFS=local
-unset DBUS_SESSION_BUS_ADDRESS DISPLAY
+unset DBUS_SESSION_BUS_ADDRESS DISPLAY DCONF_PROFILE
 # Keep the entire desktop, its settings and its D-Bus activation isolated.
 dbus-run-session -- sh -eu -c '
     export DBUS_SYSTEM_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"

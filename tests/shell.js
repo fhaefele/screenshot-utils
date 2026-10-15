@@ -4,9 +4,11 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
+import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
+import {DELAY_STEPS} from '../delay.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
@@ -101,9 +103,13 @@ async function click(pointer, actor) {
 }
 
 function requestCapture(mode) {
+    return requestCommand('Capture', new GLib.Variant('(s)', [mode]));
+}
+
+function requestCommand(method, parameters = null) {
     return new Promise((resolve, reject) => Gio.DBus.session.call(
-        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', 'Capture',
-        new GLib.Variant('(s)', [mode]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        'org.gnome.Shell', '/org/gnome/shell/extensions/screenshotutils', 'dev.fxth.ScreenshotUtils', method,
+        parameters, null, Gio.DBusCallFlags.NONE, 5000, null,
         (connection, result) => {
             try {
                 resolve(connection.call_finish(result));
@@ -180,11 +186,15 @@ export async function run() {
         }));
 
     try {
-        assert(!settings.get_boolean('enable-shortcut-commands'), 'Shortcut commands are enabled by default');
+        assert(!settings.get_boolean('shortcuts-enabled'), 'Shortcut commands are enabled by default');
         const deniedCommand = await requestCapture('screen').then(() => null, error => error);
         assert(Gio.DBusError.get_remote_error(deniedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable' && !extension._busy,
             'Capture API accepted a command without permission');
-        settings.set_boolean('enable-shortcut-commands', true);
+        assert(settings.get_string('shortcut-setup') === '', 'A shortcut source was selected by default');
+        settings.set_boolean('shortcuts-enabled', true);
+        const noSource = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(noSource) === 'dev.fxth.ScreenshotUtils.Unavailable', 'Enabled switch bypassed source selection');
+        settings.set_string('shortcut-setup', 'gnome');
         print('PASS: screenshot command access requires explicit opt-in');
         const button = Main.panel.statusArea[UUID];
         assert(!button._nativeUiButton, 'Redundant native screenshot UI button is present');
@@ -195,8 +205,9 @@ export async function run() {
         const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const originalScheme = themeSettings.get_string('color-scheme');
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
-            button._folderButton, button._preferencesButton];
+            button._folderButton, button._preferencesButton, button._cursorButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
+        const colorKey = color => [color.red, color.green, color.blue, color.alpha].join(',');
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
         const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
         try {
@@ -224,6 +235,114 @@ export async function run() {
                     assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
                         'Switching color scheme changed capture control geometry');
                 });
+                const cursor = button._cursorButton;
+                const delayRow = button._delaySlider.get_parent();
+                const controlsRow = cursor.get_parent();
+                const clock = delayRow.get_children().find(actor => actor.visible && actor instanceof St.Icon);
+                const [cursorWidth, cursorHeight] = cursor.child.get_transformed_size();
+                const [clockWidth, clockHeight] = clock.get_transformed_size();
+                assert(cursorWidth === clockWidth && cursorHeight === clockHeight,
+                    `Cursor and clock icons have different sizes: ${cursorWidth}x${cursorHeight} vs ${clockWidth}x${clockHeight}`);
+                const menuWidth = button.menu.actor.width;
+                const rowWidth = controlsRow.width;
+                const delay = settings.get_int('capture-delay-ms');
+                cursor.hide();
+                await Scripting.sleep(50);
+                const baselineSliderWidth = button._delaySlider.width;
+                const baselineRowSize = controlsRow.get_transformed_size();
+                cursor.show();
+                await Scripting.sleep(50);
+                assert(button.menu.actor.width === menuWidth && controlsRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
+                'Cursor toggle should shorten the slider without widening the menu or delay row');
+                const [cursorX, cursorY] = cursor.get_transformed_position();
+                const [selectionX, selectionY] = button._selectionButton.get_transformed_position();
+                const [delayX] = delayRow.get_transformed_position();
+                const [clockX] = clock.get_transformed_position();
+                const [sliderX] = button._delaySlider.get_transformed_position();
+                assert(Math.abs(cursorX - selectionX) < 1,
+                    'Cursor toggle is not aligned with the selection button');
+                assert(delayX > cursorX + cursor.width && clockX >= delayX &&
+                    clockX - cursorX - cursor.width <= 8,
+                'Cursor and clock need a small, non-overlapping gap');
+                const [labelX] = button._delayLabel.get_transformed_position();
+                assert(labelX - clockX - clockWidth <= 4 && labelX >= clockX + clockWidth,
+                    'Clock and delay text are too far apart or overlap');
+                const rowGap = cursorY - selectionY - button._selectionButton.height;
+                assert(rowGap >= 0 && rowGap <= 8, 'Capture and bottom controls need a compact gap');
+                const [boxX, boxY] = button.menu.box.get_transformed_position();
+                const [boxWidth, boxHeight] = button.menu.box.get_transformed_size();
+                const topEdge = Math.min(...controls.filter(actor => actor !== cursor)
+                    .map(actor => actor.get_transformed_position()[1]));
+                const insets = [selectionX - boxX, topEdge - boxY,
+                    boxX + boxWidth - sliderX - button._delaySlider.width,
+                    boxY + boxHeight - cursorY - cursor.height];
+                assert(Math.max(...insets) - Math.min(...insets) < 1,
+                    `Outer menu padding differs between edges: ${insets.join(', ')}; ` +
+                    `delay=${delayRow.width}, slider=${sliderX}/${button._delaySlider.width}/${button._delaySlider.get_transformed_size()[0]}`);
+                const delayActors = [clock, button._delayLabel];
+                const delayColors = delayActors.map(actor => colorKey(actor.get_theme_node().get_foreground_color()));
+                const menuForeground = colorKey(button.menu.box.get_theme_node().get_foreground_color());
+                assert(delayColors.every(color => color === menuForeground),
+                    'Clock or delay text does not use the normal menu foreground');
+                const menuBackground = luminance(button.menu.box.get_theme_node().get_background_color());
+                assert(delayActors.every(actor => {
+                    const foreground = luminance(actor.get_theme_node().get_foreground_color());
+                    return Math.abs(foreground - menuBackground) > 40 && (!supportsColorScheme ||
+                        (scheme === 'prefer-light' ? foreground < menuBackground : foreground > menuBackground));
+                }), 'Clock or delay text has poor contrast with the menu theme');
+                await movePointer(pointer, cursorX + cursor.width / 2, cursorY + cursor.height / 2);
+                await waitUntil(() => cursor.hover && !delayRow.hover && !controlsRow.active,
+                    'Hovering the cursor highlights the delay controls or whole row');
+                await Scripting.sleep(150);
+                await preview(`hover-cursor-${scheme}.png`);
+                const [, sliderY] = button._delaySlider.get_transformed_position();
+                await movePointer(pointer, sliderX + button._delaySlider.width / 2,
+                    sliderY + button._delaySlider.height / 2);
+                await waitUntil(() => delayRow.hover && !cursor.hover && !controlsRow.active,
+                    'Delay hover did not stay separate from the cursor and outer row');
+                await Scripting.sleep(150);
+                assert(delayRow.get_theme_node().get_background_color().alpha === 0,
+                    'Hovering the delay controls shows a background highlight');
+                assert(delayActors.every((actor, index) =>
+                    colorKey(actor.get_theme_node().get_foreground_color()) === delayColors[index]),
+                'Hovering delay changes the clock or text color');
+                await preview(`hover-delay-${scheme}.png`);
+                const savedDelay = settings.get_int('capture-delay-ms');
+                const unitPositions = [];
+                for (const milliseconds of DELAY_STEPS) {
+                    settings.set_int('capture-delay-ms', milliseconds);
+                    await Scripting.sleep(30);
+                    const text = button._delayLabel.clutter_text;
+                    const [success, unitX] = text.position_to_coords(button._delayLabel.text.length - 1);
+                    assert(success, 'Could not measure the delay unit position');
+                    unitPositions.push(button._delayLabel.get_transformed_position()[0] + unitX);
+                    if (milliseconds === 100)
+                        await preview(`delay-100ms-${scheme}.png`);
+                }
+                settings.set_int('capture-delay-ms', savedDelay);
+                assert(Math.max(...unitPositions) - Math.min(...unitPositions) < 1,
+                    `Delay unit moved when changing values: ${unitPositions.join(', ')}`);
+                const backgrounds = [];
+                for (const enabled of [false, true]) {
+                    settings.set_boolean('include-cursor', enabled);
+                    await waitUntil(() => cursor.checked === enabled,
+                        'Preferences cursor setting did not update the menu toggle');
+                    await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
+                    await Scripting.sleep(250);
+                    const background = cursor.get_theme_node().get_background_color();
+                    backgrounds.push(colorKey(background));
+                    assert(cursor.label_actor.text === `Capture mouse cursor: ${enabled ? 'on' : 'off'}`,
+                        'Cursor tooltip does not describe the current setting');
+                    await preview(`menu-${scheme}-cursor-${enabled ? 'on' : 'off'}.png`);
+                    await click(pointer, cursor);
+                    assert(settings.get_boolean('include-cursor') === !enabled && cursor.checked === !enabled,
+                        'Cursor toggle did not update the screenshot preference');
+                    assert(button.menu.isOpen && settings.get_int('capture-delay-ms') === delay,
+                        'Cursor toggle closed the menu or changed the delay');
+                    assert(button.menu.actor.width === menuWidth && controlsRow.width === rowWidth,
+                        'Cursor toggle changed the menu boundaries');
+                }
+                assert(backgrounds[0] !== backgrounds[1], 'Cursor toggle has no visible checked state');
                 await preview(`menu-${scheme}.png`);
             }
         } finally {
@@ -260,8 +379,9 @@ export async function run() {
         await Scripting.sleep(30);
         const delayControls = slider.get_parent().get_children().filter(actor => actor.visible);
         assert(delayControls.length === 3 && delayControls[0] instanceof St.Icon &&
-            delayControls[1] === button._delayLabel && delayControls[2] === slider,
-        'Delay row should contain clock, time and slider');
+            delayControls[1] === button._delayLabel && delayControls[2] === slider &&
+            button._cursorButton.get_parent() === slider.get_parent().get_parent(),
+        'Cursor toggle should sit beside a separate clock, time and slider area');
         const savedDelay = settings.get_int('capture-delay-ms');
         for (const actor of delayControls.slice(0, 2)) {
             assert(!actor.reactive && !actor.can_focus, 'Clock and time must be read-only');
@@ -277,12 +397,13 @@ export async function run() {
         await Scripting.sleep(20);
         assert(Math.abs(button._delaySlider.value - 0.4) < 0.001 && button._delayTooltip.text === 'Screenshot delay: 1 s',
             'Preferences delay did not update the panel slider');
-        for (const [actor, name] of [[button._folderButton, 'folder'],
-            [button._preferencesButton, 'preferences'], [slider, 'delay']]) {
+        for (const [actor, name, sharedTooltip] of [[button._cursorButton, 'cursor'], [button._folderButton, 'folder'],
+            [button._preferencesButton, 'preferences'], [delayControls[0], 'delay-clock', button._delayTooltip],
+            [button._delayLabel, 'delay-time', button._delayTooltip], [slider, 'delay']]) {
             const [x, y] = actor.get_transformed_position();
             const [width, height] = actor.get_transformed_size();
             await movePointer(pointer, x + width / 2, y + height / 2);
-            const tooltip = actor.label_actor;
+            const tooltip = sharedTooltip ?? actor.label_actor;
             await waitUntil(() => tooltip.visible && tooltip.opacity === 255, `Missing ${name} hover tooltip`);
             assert(tooltip.y >= y + height && tooltip.y > Main.panel.get_transformed_size()[1],
                 `${name} tooltip overlaps the top bar or hovered control`);
@@ -303,7 +424,7 @@ export async function run() {
             extension.openPreferences = realOpenPreferences;
         }
         assert(!button.menu.isOpen, 'Preferences action left the menu open');
-        assert([button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
+        assert([button._cursorButton, button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
             'A tooltip remained visible after closing the menu');
         print('PASS: icon menu, preferences action and delay slider synchronization');
 
@@ -468,7 +589,32 @@ export async function run() {
             await click(pointer, extension._commandDialog._allowButton);
             await waitUntil(() => !extension._commandDialog, 'Command confirmation did not close');
         };
-        // Settings are caller-writable. They must never substitute for a Shell gesture.
+        const rejectDelayedModal = async (trigger, name) => {
+            const previousDelay = settings.get_int('capture-delay-ms');
+            const previousTemplate = settings.get_string('filename-template');
+            const modal = new St.Widget({reactive: true});
+            Main.uiGroup.add_child(modal);
+            let grab = null;
+            try {
+                settings.set_int('capture-delay-ms', 1000);
+                settings.set_string('filename-template', `${name}-{N}`);
+                await trigger();
+                await waitUntil(() => extension._busy && extension._run.pending.size > 0,
+                    'Shortcut capture did not start before the modal');
+                grab = Main.pushModal(modal);
+                assert(grab, 'Test could not grab delayed modal input');
+                await waitUntil(() => !extension._busy, 'Delayed shortcut capture did not stop for the modal');
+                assert(!directory.get_child(`${name}-screen.png`).query_exists(null),
+                    'Delayed shortcut captured a newly opened Shell modal');
+            } finally {
+                if (grab)
+                    Main.popModal(grab);
+                modal.destroy();
+                settings.set_int('capture-delay-ms', previousDelay);
+                settings.set_string('filename-template', previousTemplate);
+            }
+        };
+        // Ask is on by default and requires a separate gesture for each command.
         settings.set_int('capture-delay-ms', 0);
         settings.set_boolean('mute-screenshot-sound', true);
         await requestCapture('screen');
@@ -476,7 +622,7 @@ export async function run() {
         await Scripting.sleep(250);
         await preview('command-confirmation.png');
         assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
-            'Caller-writable settings authorized an unconfirmed screenshot');
+            'Ask on authorized an unconfirmed screenshot');
         await click(pointer, extension._commandDialog._cancelButton);
         await waitUntil(() => !extension._commandDialog && !extension._busy, 'Denied command did not finish');
         assert(!directory.get_child('Shortcut-screen.png').query_exists(null), 'Denied command saved a screenshot');
@@ -484,8 +630,8 @@ export async function run() {
             await requestCapture(mode);
             await waitUntil(() => extension._commandDialog?.visible, 'Revocation confirmation did not open');
             const dialog = extension._commandDialog;
-            settings.set_boolean('enable-shortcut-commands', false);
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', false);
+            settings.set_boolean('shortcuts-enabled', true);
             assert(dialog.destroyed && !extension._commandDialog, 'Revocation left confirmation open');
             await waitUntil(() => !extension._busy, 'Revoked confirmation did not finish');
         }
@@ -493,8 +639,8 @@ export async function run() {
         await requestCapture('screen');
         await allowCommand();
         await Scripting.sleep(50);
-        settings.set_boolean('enable-shortcut-commands', false);
-        settings.set_boolean('enable-shortcut-commands', true);
+        settings.set_boolean('shortcuts-enabled', false);
+        settings.set_boolean('shortcuts-enabled', true);
         await waitUntil(() => !extension._busy, 'Revoked command delay did not finish');
         assert(!directory.get_child('Shortcut-screen.png').query_exists(null),
             'Re-enabling access revived an approved screenshot');
@@ -507,17 +653,17 @@ export async function run() {
             const source = Gio.SettingsSchemaSource.new_from_directory(ARGV[0] + '/schemas',
                 Gio.SettingsSchemaSource.get_default(), false);
             const settings = new Gio.Settings({settings_schema: source.lookup('org.gnome.shell.extensions.screenshot-utils', true)});
-            settings.set_boolean('enable-shortcut-commands', false);
+            settings.set_boolean('shortcuts-enabled', false);
             Gio.Settings.sync();
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', true);
             Gio.Settings.sync();
         `, extension.path], Gio.SubprocessFlags.NONE);
         // Delay Shell's notification dispatch until the external setting is true.
         externalToggle.wait_check(null);
-        assert(settings.get_boolean('enable-shortcut-commands'), 'External toggle did not re-enable commands');
+        assert(settings.get_boolean('shortcuts-enabled'), 'External toggle did not re-enable commands');
         // Backends may coalesce the writes. Exercise their queued changed signal
         // with the final value, then also allow actual external notifications.
-        extension._settings.emit('changed::enable-shortcut-commands', 'enable-shortcut-commands');
+        extension._settings.emit('changed::shortcuts-enabled', 'shortcuts-enabled');
         assert(extension._run.commandEpoch > commandEpoch,
             'An enabled-value notification preserved an approved command');
         await waitUntil(() => !extension._busy, 'External revocation did not finish');
@@ -531,8 +677,8 @@ export async function run() {
                 ? extension._selector?._grabHelper.grabbed : extension._windowSession?.visible,
             'Approved command picker did not open');
             const picker = mode === 'selection' ? extension._selector : extension._windowSession;
-            settings.set_boolean('enable-shortcut-commands', false);
-            settings.set_boolean('enable-shortcut-commands', true);
+            settings.set_boolean('shortcuts-enabled', false);
+            settings.set_boolean('shortcuts-enabled', true);
             assert(picker.destroyed && !extension._selector && !extension._windowSession,
                 'Revocation left command picker open');
             await waitUntil(() => !extension._busy, 'Revoked picker did not finish');
@@ -541,8 +687,8 @@ export async function run() {
         try {
             extension._createUniqueFile = async (...args) => {
                 const output = await createBeforeRevocation.call(extension, ...args);
-                settings.set_boolean('enable-shortcut-commands', false);
-                settings.set_boolean('enable-shortcut-commands', true);
+                settings.set_boolean('shortcuts-enabled', false);
+                settings.set_boolean('shortcuts-enabled', true);
                 return output;
             };
             await requestCapture('screen');
@@ -612,6 +758,168 @@ export async function run() {
             'System shortcut commands changed Print Screen');
         settings.set_string('filename-template', 'Integration-{N}');
         print('PASS: system shortcut commands, all modes, immediate reply, busy rejection and unchanged Print Screen');
+
+        assert(settings.get_boolean('ask-command-confirmation'), 'GNOME commands do not default to Ask');
+        settings.set_boolean('ask-command-confirmation', false);
+        assert(!extension._commandDialog, 'Turning Ask off opened a setup dialog');
+        const skipCapture = async name => {
+            settings.set_string('filename-template', `${name}-{N}`);
+            await requestCapture('screen');
+            await waitUntil(() => !extension._busy && directory.get_child(`${name}-screen.png`).query_exists(null),
+                'Ask off did not capture without confirmation');
+            assert(!extension._commandDialog, 'Ask off opened a confirmation dialog');
+            checkPng(directory, `${name}-screen.png`);
+        };
+        await skipCapture('Skip-first');
+        await skipCapture('Skip-repeat');
+        extension.disable();
+        extension.enable();
+        assert(!settings.get_boolean('ask-command-confirmation'), 'Runtime restart changed the Ask setting');
+        await skipCapture('Skip-restarted');
+        Main.extensionManager.disableExtension(UUID);
+        await waitUntil(() => !Main.panel.statusArea[UUID], 'Explicit disable did not finish');
+        Main.extensionManager.enableExtension(UUID);
+        await waitUntil(() => Main.panel.statusArea[UUID], 'Explicit re-enable did not finish');
+        extension = Main.panel.statusArea[UUID]._extension;
+        assert(!settings.get_boolean('ask-command-confirmation'), 'Re-enabling forgot the saved Ask choice');
+        await skipCapture('Skip-reenabled');
+        await rejectDelayedModal(() => requestCapture('screen'), 'Command-modal');
+        settings.set_boolean('ask-command-confirmation', true);
+        assert(!extension._commandDialog, 'Turning Ask on opened a setup dialog');
+        settings.set_string('filename-template', 'Ask-repeat-{N}');
+        await requestCapture('screen');
+        await allowCommand();
+        await waitUntil(() => !extension._busy, 'Asked screenshot did not finish');
+        checkPng(directory, 'Ask-repeat-screen.png');
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask on did not confirm the next request');
+        await click(pointer, extension._commandDialog._cancelButton);
+        await waitUntil(() => !extension._busy, 'Cancelled repeat request did not finish');
+        assert(!directory.get_child('Ask-repeat-screen-2.png').query_exists(null), 'Cancelled request saved a screenshot');
+        settings.set_string('filename-template', 'Toggle-cancelled-{N}');
+        settings.set_boolean('ask-command-confirmation', false);
+        settings.set_int('capture-delay-ms', 1000);
+        await requestCapture('screen');
+        await waitUntil(() => extension._run.pending.size > 0, 'Skip capture did not begin its delay');
+        settings.set_boolean('ask-command-confirmation', true);
+        await waitUntil(() => !extension._busy, 'Turning Ask on did not cancel the pending skip capture');
+        settings.set_int('capture-delay-ms', 0);
+        await requestCapture('screen');
+        await waitUntil(() => extension._commandDialog?.visible, 'Ask prompt did not open for toggle cancellation');
+        const toggledDialog = extension._commandDialog;
+        settings.set_boolean('ask-command-confirmation', false);
+        await waitUntil(() => !extension._busy, 'Turning Ask off did not cancel the pending prompt');
+        assert(toggledDialog.destroyed && !extension._commandDialog &&
+            !directory.get_child('Toggle-cancelled-screen.png').query_exists(null),
+        'Changing Ask resumed a cancelled screenshot');
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: direct Ask/Skip toggle, repeated requests, saved choice across restart/re-enable and pending capture cancellation');
+        // Refresh the helper's inactivity timeout before using its windows again.
+        await Scripting.waitTestWindows();
+
+        settings.set_string('filename-template', 'Native-{N}');
+        settings.set_boolean('ask-command-confirmation', false);
+        settings.set_string('shortcut-setup', 'extension');
+        assert(settings.get_boolean('ask-command-confirmation'), 'Native source retained the GNOME Skip setting');
+        settings.set_string('shortcut-screen', 'a');
+        assert(settings.get_string('shortcut-screen') === '' && !extension._shortcuts.bindings.has('screen'),
+            'External preference registered a plain typing key');
+        settings.set_string('shortcut-screen', '<Control><Shift>F10');
+        assert(extension._shortcuts.bindings.has('screen'), 'Free native shortcut did not register');
+        const originalScreenBinding = settings.get_string('shortcut-screen');
+        settings.set_string('shortcut-selection', originalScreenBinding);
+        assert(!extension._shortcuts.bindings.has('selection') && settings.get_string('shortcut-selection') === '' &&
+            settings.get_value('shortcut-status').deep_unpack().selection, 'Duplicate native shortcut was accepted');
+        const wmKeys = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.keybindings'});
+        const switchApps = wmKeys.get_strv('switch-applications');
+        assert(switchApps.length > 0, 'No predefined system shortcut for conflict test');
+        settings.set_string('shortcut-screen', switchApps[0]);
+        assert(settings.get_string('shortcut-screen') === originalScreenBinding &&
+            JSON.stringify(wmKeys.get_strv('switch-applications')) === JSON.stringify(switchApps),
+        'Native conflict replaced a previous or system assignment');
+        settings.set_string('shortcut-selection', '<Control><Shift>F11');
+        settings.set_string('shortcut-window', '<Control><Shift>F12');
+        const blockedCommand = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(blockedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable',
+            'Extension shortcut mode accepted an external capture command');
+        const pressShortcut = async key => {
+            for (const modifier of [Clutter.KEY_Control_L, Clutter.KEY_Shift_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
+            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            for (const modifier of [Clutter.KEY_Shift_L, Clutter.KEY_Control_L])
+                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.RELEASED);
+            await Scripting.sleep(30);
+        };
+        Main.overview.show();
+        await waitUntil(() => Main.overview.visible && !Main.overview.animationInProgress,
+            'Overview did not open for native shortcut exclusion');
+        await pressShortcut(Clutter.KEY_F10);
+        await Scripting.sleep(100);
+        assert(!extension._busy && !directory.get_child('Native-screen.png').query_exists(null),
+            'Native shortcut captured while Overview owned a modal grab');
+        Main.overview.hide();
+        await waitUntil(() => !Main.overview.visible && !Main.overview.animationInProgress,
+            'Overview did not close after native shortcut exclusion');
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
+            'Native screen keypress did not capture');
+        assert(!extension._commandDialog, 'Native keypress opened command confirmation');
+        checkPng(directory, 'Native-screen.png');
+        await rejectDelayedModal(() => pressShortcut(Clutter.KEY_F10), 'Native-modal');
+        print('PASS: delayed command and native captures reject newly opened Shell modals');
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native selection keypress did not open selection');
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
+        await waitUntil(() => !extension._selector, 'Native selection did not cancel');
+        await pressShortcut(Clutter.KEY_F12);
+        await waitUntil(() => extension._windowSession?.visible, 'Native window keypress did not open window picker');
+        await Scripting.sleep(250);
+        await click(pointer, extension._windowSession.windows.keys().next().value);
+        await waitUntil(() => !extension._windowSession && !extension._busy, 'Native window capture did not finish');
+        checkPng(directory, 'Native-window.png');
+        settings.set_string('filename-template', 'Native-revoked-{N}');
+        settings.set_int('capture-delay-ms', 1000);
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => extension._busy && extension._run.pending.size > 0, 'Native delayed capture did not begin');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._busy, 'Native assignment change did not cancel delayed capture');
+        assert(!directory.get_child('Native-revoked-screen.png').query_exists(null),
+            'Revoked native capture saved a delayed screenshot');
+        settings.set_int('capture-delay-ms', 0);
+        await pressShortcut(Clutter.KEY_F11);
+        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native assignment change selector did not open');
+        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
+        await waitUntil(() => !extension._selector, 'Native assignment change did not cancel selection');
+        assert(!directory.get_child('Native-revoked-area.png').query_exists(null),
+            'Revoked native selection saved a screenshot');
+        print('PASS: native assignment changes cancels pending captures and pickers');
+        settings.set_boolean('shortcuts-enabled', false);
+        assert(extension._shortcuts.bindings.size === 0, 'Master switch did not release native keys');
+        assert(settings.get_string('shortcut-screen') === originalScreenBinding, 'Master switch erased saved keys');
+        settings.set_boolean('shortcuts-enabled', true);
+        assert(extension._shortcuts.bindings.size === 3, 'Master switch did not restore native keys immediately');
+        const nativeNames = [...extension._shortcuts.bindings.values()].map(binding => binding.name);
+        extension.disable();
+        assert(nativeNames.every(name => !(name in Main.wm._allowedKeybindings)), 'Native shortcut allowances leaked on disable');
+        const freeProbe = global.display.grab_accelerator(originalScreenBinding, Meta.KeyBindingFlags.NONE);
+        assert(freeProbe !== Meta.KeyBindingAction.NONE, 'Disable did not release native shortcut');
+        global.display.ungrab_accelerator(freeProbe);
+        extension.enable();
+        assert(extension._shortcuts.bindings.size === 3, 'Native shortcuts did not restore after enable');
+        settings.set_string('filename-template', 'Native-restarted-{N}');
+        await pressShortcut(Clutter.KEY_F10);
+        await waitUntil(() => !extension._busy && directory.get_child('Native-restarted-screen.png').query_exists(null),
+            'Native shortcut did not capture immediately after restart');
+        assert(!extension._commandDialog, 'Native shortcut requested approval after restart');
+        settings.set_string('shortcut-setup', 'gnome');
+        assert(extension._shortcuts.bindings.size === 0 && settings.get_string('shortcut-screen') === originalScreenBinding,
+            'Mode switch did not release keys and preserve configuration');
+        settings.set_boolean('ask-command-confirmation', true);
+        settings.set_string('filename-template', 'Integration-{N}');
+        print('PASS: real native keypresses, all modes, conflicts, external-command isolation and complete shortcut cleanup');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
             GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,

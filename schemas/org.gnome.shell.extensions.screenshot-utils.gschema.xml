@@ -28,10 +28,36 @@
       <default>false</default>
       <summary>Copy the screenshot image to the clipboard</summary>
     </key>
-    <key name="enable-shortcut-commands" type="b">
+    <key name="shortcuts-enabled" type="b">
       <default>false</default>
-      <summary>Allow shortcut commands</summary>
-      <description>Allow local session-bus clients to request screenshots, with confirmation in GNOME Shell for each request. Disabling cancels pending command captures.</description>
+      <summary>Enable keyboard shortcuts</summary>
+      <description>Enable the chosen shortcut source. Turning off cancels pending shortcut captures.</description>
+    </key>
+    <key name="shortcut-setup" type="s">
+      <default>''</default>
+      <choices><choice value=""/><choice value="gnome"/><choice value="extension"/></choices>
+      <summary>Shortcut setup</summary>
+    </key>
+    <key name="ask-command-confirmation" type="b">
+      <default>true</default>
+      <summary>Ask before screenshots from commands</summary>
+      <description>When true, confirm each screenshot command. When false, any local application can take screenshots by invoking the commands. This choice persists across logins and Shell restarts.</description>
+    </key>
+    <key name="shortcut-selection" type="s">
+      <default>''</default>
+      <summary>Selection shortcut</summary>
+    </key>
+    <key name="shortcut-screen" type="s">
+      <default>''</default>
+      <summary>Screen shortcut</summary>
+    </key>
+    <key name="shortcut-window" type="s">
+      <default>''</default>
+      <summary>Window shortcut</summary>
+    </key>
+    <key name="shortcut-status" type="a{ss}">
+      <default>{}</default>
+      <summary>Shortcut registration feedback</summary>
     </key>
     <key name="mute-screenshot-sound" type="b">
       <default>false</default>

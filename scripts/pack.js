@@ -7,7 +7,8 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 const sources = ['extension.js', 'prefs.js', 'filename.js', 'location.js', 'delay.js',
-    'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js', 'capture-icons.js'];
+    'shell-compat.js', 'prefs-compat.js', 'capture-selectors.js', 'async-utils.js', 'capture-icons.js',
+    'shortcuts.js', 'shortcut-manager.js', 'shortcut-prefs.js'];
 
 // esbuild bundles shared local modules. Only GJS's native imports stay external.
 const legacyRequire = `function require(specifier) {
@@ -48,7 +49,7 @@ async function pack() {
         for (const target of ['modern', 'legacy']) {
             const directory = resolve(stage, target);
             await mkdir(directory);
-            for (const source of ['schemas', 'LICENSE', 'README.md'])
+            for (const source of ['schemas', 'assets', 'LICENSE', 'README.md'])
                 await cp(resolve(root, source), resolve(directory, source), {recursive: true});
             const targetMetadata = {...metadata, 'shell-version': target === 'legacy' ? ['42', '43', '44'] : metadata['shell-version']};
             await writeFile(resolve(directory, 'metadata.json'), `${JSON.stringify(targetMetadata, null, 2)}\n`);
@@ -66,7 +67,7 @@ async function pack() {
             await mkdir(targetOutput, {recursive: true});
             const extras = target === 'modern' ? sources.slice(2) : [];
             execFileSync('gnome-extensions', ['pack', '--force', ...extras.map(source => `--extra-source=${source}`),
-                '--extra-source=LICENSE', '--extra-source=README.md', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
+                '--extra-source=assets', '--extra-source=LICENSE', '--extra-source=README.md', `--out-dir=${targetOutput}`, directory], {stdio: 'inherit'});
             if (target === 'legacy') {
                 // Older Shell versions need compiled schemas included in the package.
                 execFileSync('glib-compile-schemas', ['--strict', resolve(directory, 'schemas')]);

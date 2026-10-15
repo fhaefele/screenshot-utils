@@ -3,6 +3,7 @@ import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
+import Gdk from 'gi://Gdk?version=4.0';
 
 function assert(condition, message) {
     if (!condition)
@@ -14,6 +15,10 @@ function descendants(widget) {
     for (let child = widget.get_first_child(); child; child = child.get_next_sibling())
         result.push(...descendants(child));
     return result;
+}
+
+function toggleControl(row) {
+    return Adw.SwitchRow ? row : descendants(row).find(widget => widget instanceof Gtk.Switch);
 }
 
 function clipboardText(window) {
@@ -49,18 +54,29 @@ export async function checkPreferences(preferences) {
     const previousFolder = settings.get_string('save-location');
     const previousTemplate = settings.get_string('filename-template');
     const previousDelay = settings.get_int('capture-delay-ms');
-    const previousCommands = settings.get_boolean('enable-shortcut-commands');
+    const previousCommands = settings.get_boolean('shortcuts-enabled');
+    const previousSetup = settings.get_string('shortcut-setup');
+    const previousAsk = settings.get_boolean('ask-command-confirmation');
+    const previousBindings = ['shortcut-selection', 'shortcut-screen', 'shortcut-window']
+        .map(key => [key, settings.get_string(key)]);
+    settings.set_string('shortcut-setup', '');
+    settings.set_boolean('shortcuts-enabled', false);
+    settings.set_boolean('ask-command-confirmation', true);
     const window = new Adw.PreferencesWindow();
 
     try {
         preferences.fillPreferencesWindow(window);
         const widgets = descendants(window);
-        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 5,
+        assert(widgets.filter(widget => Adw.SwitchRow ? widget instanceof Adw.SwitchRow : widget instanceof Gtk.Switch).length === 6,
             'Preferences contain an obsolete capture switch');
         const folder = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Screenshot folder');
         const template = widgets.find(widget => typeof widget.get_text === 'function' && widget.title === 'Filename template');
         const preview = widgets.find(widget => widget instanceof Gtk.Label && widget.label.startsWith('Preview: '));
         assert(folder?.text === previousFolder && folder.text.trim(), 'Folder was not prefilled with the saved path');
+        const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
+        window.present();
+        await waitUntil(() => window.get_mapped(), 'Preferences did not open');
+        assert(window.get_focus() === browse, 'Opening preferences focused an editable field');
         folder.text = '';
         folder.emit('apply');
         assert(folder.text === previousFolder && settings.get_string('save-location') === previousFolder,
@@ -92,24 +108,28 @@ export async function checkPreferences(preferences) {
         }
 
         const shortcuts = widgets.find(widget => widget instanceof Adw.PreferencesGroup &&
-            widget.title === 'Keyboard Shortcuts');
+            widget.title === 'Keyboard shortcuts');
         assert(shortcuts, 'Keyboard shortcut instructions are missing');
         const shortcutWidgets = descendants(shortcuts);
-        const allowCommands = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
-            widget.title === 'Allow shortcut commands');
-        assert(allowCommands && allowCommands.subtitle.includes('local applications'),
-            'Shortcut permission has no disclosure');
-        const commandSwitch = Adw.SwitchRow ? allowCommands : descendants(allowCommands).find(widget => widget instanceof Gtk.Switch);
-        commandSwitch.active = !previousCommands;
-        assert(settings.get_boolean('enable-shortcut-commands') === !previousCommands, 'Shortcut permission was not saved');
-        commandSwitch.active = previousCommands;
-        const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
-            widget.label.startsWith('Keyboard Settings →'));
-        assert(instructions && !instructions.has_css_class('caption') && !instructions.has_css_class('dim-label'),
-            'Keyboard shortcut instructions are missing or styled as a small note');
-        const commandRows = instructions.get_next_sibling();
-        assert(instructions.get_parent().get_first_child() === instructions && commandRows instanceof Gtk.ListBox,
-            'Keyboard shortcut instructions are not directly above the commands');
+        const enableShortcuts = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow &&
+            widget.title === 'Enable keyboard shortcuts');
+        const commandSwitch = toggleControl(enableShortcuts);
+        const setup = shortcutWidgets.find(widget => widget instanceof Adw.ComboRow && widget.title === 'Source');
+        assert(!commandSwitch.active && !setup.visible && setup.selected === 0,
+            'Disabled shortcuts showed source controls');
+        commandSwitch.active = true;
+        assert(settings.get_boolean('shortcuts-enabled') && setup.visible && setup.selected === 0 &&
+            settings.get_string('shortcut-setup') === 'extension',
+            'Master switch did not reveal the default Extension source');
+        assert(setup.model.get_n_items() === 2 &&
+            setup.model.get_string(0) === 'Extension' && setup.model.get_string(1) === 'GNOME keyboard settings',
+            'Source choices differ from the two supported modes');
+        const sourceExplanation = setup.subtitle;
+        setup.selected = 1;
+        assert(settings.get_string('shortcut-setup') === 'gnome', 'GNOME source choice was not saved');
+        const commandRows = shortcutWidgets.find(widget => widget instanceof Gtk.ListBox &&
+            widget.get_first_child()?.title === 'Selection');
+        assert(commandRows, 'Screenshot command rows are missing');
         const toasts = [];
         const originalAddToast = window.add_toast;
         window.add_toast = toast => {
@@ -143,27 +163,88 @@ export async function checkPreferences(preferences) {
                 `${title} text selection did not copy the complete command`);
         }
         const openKeyboardSettings = shortcutWidgets.find(widget => widget instanceof Gtk.Button &&
-            widget.label === 'Keyboard Settings');
-        assert(openKeyboardSettings, 'Keyboard Settings button is missing');
+            widget.label === 'Keyboard settings');
+        assert(openKeyboardSettings, 'Keyboard settings button is missing');
         const originalCreateApp = Gio.AppInfo.create_from_commandline;
         try {
             let launched = false;
             Gio.AppInfo.create_from_commandline = (command, _name, flags) => {
-                assert(command === 'gnome-control-center keyboard', 'Wrong Keyboard Settings command');
+                assert(command === 'gnome-control-center keyboard', 'Wrong Keyboard settings command');
                 assert(flags === Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION,
-                    'Keyboard Settings launch has no activation context');
+                    'Keyboard settings launch has no activation context');
                 return {launch: (files, context) => { launched = files.length === 0 && context !== null; }};
             };
             openKeyboardSettings.emit('clicked');
-            assert(launched, 'Keyboard Settings button did not launch the panel');
-            Gio.AppInfo.create_from_commandline = () => { throw new Error('Keyboard Settings unavailable in test'); };
+            assert(launched, 'Keyboard settings button did not launch the panel');
+            Gio.AppInfo.create_from_commandline = () => { throw new Error('Keyboard settings unavailable in test'); };
             openKeyboardSettings.emit('clicked');
-            assert(toasts.at(-1) === 'Could not open Keyboard Settings', 'Launch failure has no feedback');
+            assert(toasts.at(-1) === 'Could not open keyboard settings', 'Launch failure has no feedback');
         } finally {
             Gio.AppInfo.create_from_commandline = originalCreateApp;
             window.add_toast = originalAddToast;
         }
-        print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard Settings launch');
+        print('PASS: GTK shortcut commands copied to clipboard, confirmations and Keyboard settings launch');
+
+        const permissionRow = shortcutWidgets.find(widget => widget instanceof Adw.ActionRow && widget.title === 'Ask for every request');
+        const permission = toggleControl(permissionRow);
+        assert(!shortcutWidgets.some(widget => widget instanceof Gtk.Label &&
+            (widget.name === 'command-approval-scope' || widget.label.startsWith('Current setting:'))),
+        'Preferences retained approval scope text');
+        assert(permission.active && permissionRow.subtitle.includes('any local application') &&
+            permissionRow.subtitle.includes('by invoking the commands below'), 'Command confirmation switch has no explanation');
+        const instructions = shortcutWidgets.find(widget => widget instanceof Gtk.Label &&
+            widget.label === 'Keyboard settings → View and customize shortcuts → Custom shortcuts → Add.');
+        assert(instructions && instructions.get_parent() === commandRows.get_parent() &&
+            instructions.get_next_sibling() === commandRows, 'Keyboard instructions are not grouped with the command rows');
+        for (const ask of [false, true, false, true]) {
+            permission.active = ask;
+            assert(settings.get_boolean('ask-command-confirmation') === ask && permission.sensitive,
+                'Ask toggle did not save immediately');
+        }
+        settings.set_boolean('ask-command-confirmation', false);
+        assert(!permission.active, 'Ask toggle did not reflect an external settings change');
+        setup.selected = 0;
+        assert(settings.get_boolean('ask-command-confirmation'),
+            `Extension source did not reset GNOME command settings: source=${settings.get_string('shortcut-setup')}, selected=${setup.selected}`);
+        assert(settings.get_string('shortcut-setup') === 'extension' && !commandRows.get_parent().get_parent().visible,
+            'Extension setup did not hide command instructions');
+        const selectionShortcut = shortcutWidgets.find(widget => widget instanceof Adw.PreferencesRow && widget.title === 'Selection shortcut');
+        const shortcutButtons = descendants(selectionShortcut).filter(widget => widget instanceof Gtk.Button);
+        const setShortcut = shortcutButtons.find(widget => !widget.icon_name);
+        const clearShortcut = shortcutButtons.find(widget => widget.icon_name === 'edit-clear-symbolic');
+        setShortcut.emit('clicked');
+        const recorder = Array.from({length: Gtk.Window.get_toplevels().get_n_items()}, (_, index) =>
+            Gtk.Window.get_toplevels().get_item(index)).find(candidate => candidate.title === 'Set selection shortcut');
+        assert(recorder?.modal && recorder.transient_for === window, 'Shortcut recorder is not modal');
+        const controllers = recorder.observe_controllers();
+        const keyController = Array.from({length: controllers.get_n_items()}, (_, index) => controllers.get_item(index))
+            .find(controller => controller instanceof Gtk.EventControllerKey);
+        keyController.emit('key-pressed', Gdk.KEY_F11, 95, Gdk.ModifierType.CONTROL_MASK);
+        keyController.emit('key-pressed', Gdk.KEY_Return, 36, 0);
+        assert(settings.get_string('shortcut-selection') === '<Control>F11', 'Recorder did not save captured keys');
+        assert(!shortcutWidgets.some(widget => widget instanceof Gtk.Button && widget.label?.includes('Activate shortcuts')) &&
+            !permissionRow.get_parent().get_parent().visible, 'Native mode exposed command permission or approval controls');
+        clearShortcut.emit('clicked');
+        assert(settings.get_string('shortcut-selection') === '' && !clearShortcut.sensitive, 'Clear did not remove the shortcut');
+        setShortcut.emit('clicked');
+        const cancelledRecorder = Array.from({length: Gtk.Window.get_toplevels().get_n_items()}, (_, index) =>
+            Gtk.Window.get_toplevels().get_item(index)).find(candidate => candidate.title === 'Set selection shortcut');
+        const cancelledControllers = cancelledRecorder.observe_controllers();
+        const cancelledKeys = Array.from({length: cancelledControllers.get_n_items()}, (_, index) => cancelledControllers.get_item(index))
+            .find(controller => controller instanceof Gtk.EventControllerKey);
+        cancelledKeys.emit('key-pressed', Gdk.KEY_F12, 96, Gdk.ModifierType.CONTROL_MASK);
+        descendants(cancelledRecorder).find(widget => widget instanceof Gtk.Button && widget.label === 'Cancel').grab_focus();
+        cancelledKeys.emit('key-pressed', Gdk.KEY_Return, 36, 0);
+        assert(settings.get_string('shortcut-selection') === '', 'Keyboard Cancel saved a shortcut');
+        settings.set_boolean('ask-command-confirmation', false);
+        setup.selected = 1;
+        assert(commandRows.get_parent().get_parent().visible && permission.active &&
+            settings.get_boolean('ask-command-confirmation'), 'GNOME source did not restore commands with Ask on');
+        assert(setup.subtitle === sourceExplanation &&
+            sourceExplanation === 'Who should manage your keyboard shortcuts?',
+            'Source explanation changed when switching modes');
+        settings.set_boolean('shortcuts-enabled', previousCommands);
+        print('PASS: GTK master switch, source choice, direct Ask toggle and native key setup');
 
         const unchangedPreview = preview.label;
         const loop = new GLib.MainLoop(null, false);
@@ -175,7 +256,6 @@ export async function checkPreferences(preferences) {
         assert(preview.label === unchangedPreview, 'Preview refreshed without a template edit');
         print('PASS: GTK folder validation, token note, event-driven filename preview and exact delays');
 
-        const browse = descendants(folder).find(widget => widget instanceof Gtk.Button && widget.label === 'Browse…');
         assert(browse?.tooltip_text === 'Choose screenshot folder', 'Folder Browse button is missing');
         const root = Gio.File.new_for_path(GLib.dir_make_tmp('screenshot-utils-folder-picker-XXXXXX'));
         const chosen = root.get_child('Screenshots ü folder ');
@@ -195,8 +275,11 @@ export async function checkPreferences(preferences) {
                     chooser.get_action() === Gtk.FileChooserAction.SELECT_FOLDER,
                 'Folder chooser is not modal and attached to preferences');
                 await waitUntil(() => chooser.get_current_folder()?.equal(root), 'Chooser did not start at saved folder');
-                chooser.set_file(chosen);
-                await waitUntil(() => chooser.get_file()?.equal(chosen), 'Chooser did not select the requested folder');
+                // Navigate into the folder: set_file() can race the initial
+                // directory model load and lose its pending row selection.
+                chooser.set_current_folder(chosen);
+                await waitUntil(() => chooser.get_current_folder()?.equal(chosen) && chooser.get_file()?.equal(chosen),
+                    'Chooser did not select the requested folder');
                 chooser.response(Gtk.ResponseType.ACCEPT);
                 await waitUntil(() => browse.sensitive, 'Folder selection did not finish');
                 assert(settings.get_string('save-location') === chosen.get_path() && folder.text === chosen.get_path(),
@@ -226,7 +309,11 @@ export async function checkPreferences(preferences) {
         settings.set_string('save-location', previousFolder);
         settings.set_string('filename-template', previousTemplate);
         settings.set_int('capture-delay-ms', previousDelay);
-        settings.set_boolean('enable-shortcut-commands', previousCommands);
+        settings.set_boolean('shortcuts-enabled', previousCommands);
+        settings.set_boolean('ask-command-confirmation', previousAsk);
+        settings.set_string('shortcut-setup', previousSetup);
+        for (const [key, value] of previousBindings)
+            settings.set_string(key, value);
         window.close();
     }
 
