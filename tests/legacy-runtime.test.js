@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import vm from 'node:vm';
@@ -12,6 +12,26 @@ try {
         preamble: 'globalThis.bootstrapReady = true;',
         footer: 'globalThis.bundleReady = typeof LegacyRuntime.Extension === "function";',
     });
+    const soupEntry = join(directory, 'soup-entry.js');
+    const soupBundle = join(directory, 'soup.js');
+    await writeFile(soupEntry, "import Soup from 'gi://Soup?version=3.0'; export default Soup;\n");
+    await bundleLegacy(soupEntry, soupBundle, 'SoupModule');
+    const soupSource = await readFile(soupBundle, 'utf8');
+    for (const version of ['42', '43', '44']) {
+        for (const haveSoup2 of [true, false]) {
+            const namespace = {};
+            const versions = {};
+            const context = vm.createContext({imports: {
+                gi: {versions, get Soup() {
+                    assert.equal(versions.Soup, haveSoup2 ? '2.4' : '3.0');
+                    return namespace;
+                }},
+                misc: {config: {PACKAGE_VERSION: version, HAVE_SOUP2: haveSoup2}},
+            }});
+            vm.runInContext(soupSource, context);
+            assert.equal(context.SoupModule.default, namespace);
+        }
+    }
     const schema = {};
     let loadedDirectory;
     class Settings {
