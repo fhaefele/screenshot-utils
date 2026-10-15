@@ -14,7 +14,8 @@ export function releaseCacheFile(uuid) {
 
 async function fetchJSON(session, url, cancellable) {
     const message = Soup.Message.new('GET', url);
-    const stream = await callAsync(session, 'send_async', message, GLib.PRIORITY_DEFAULT, cancellable);
+    const stream = await callAsync(session, 'send_async', message,
+        ...(Soup.MAJOR_VERSION >= 3 ? [GLib.PRIORITY_DEFAULT, cancellable] : [cancellable]));
     try {
         if (message.status_code !== Soup.Status.OK)
             throw new Error(`Release check returned HTTP ${message.status_code}`);

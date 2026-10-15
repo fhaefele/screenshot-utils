@@ -32,6 +32,12 @@ export async function bundleLegacy(entry, outfile, globalName, {preamble = '', f
                 const url = new URL(args.path);
                 const name = url.hostname;
                 const version = url.searchParams.get('version');
+                if (name === 'Soup') {
+                    // GNOME 42 ships Soup 2; GNOME 43+ migrated to Soup 3.
+                    return {contents: `imports.gi.versions.Soup =
+                        Number(imports.misc.config.PACKAGE_VERSION.split('.')[0]) < 43 ? '2.4' : '3.0';
+                        export default imports.gi.Soup;`, loader: 'js'};
+                }
                 return {contents: (version ? `imports.gi.versions.${name} = ${JSON.stringify(version)};\n` : '') +
                     `export default imports.gi.${name};`, loader: 'js'};
             });
