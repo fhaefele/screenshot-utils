@@ -114,7 +114,8 @@ class CaptureButton extends PanelMenu.Button {
         for (const row of [menuRow, captureRow, controlsRow])
             row._ornamentLabel?.hide();
         this._cursorButton = new St.Button({
-            style_class: 'button',
+            // Yaru overrides default text-button hover with a translucent background.
+            style_class: SHELL_MAJOR >= 43 ? 'icon-button' : 'button',
             accessible_name: 'Capture mouse cursor',
             toggle_mode: true,
             can_focus: true,
