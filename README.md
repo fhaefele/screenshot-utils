@@ -16,11 +16,15 @@ Release a selection or choose a window to capture. Escape or right-click cancels
 
 ## Install
 
-Install or update to the latest release for your GNOME version with one command. Requires Bash, curl and GNOME's extension tools. Installs for the current user without sudo.
+Install or manage Screenshot Utils with one command. Requires Bash, Python 3, curl and GNOME's extension tools. Installs for the current user without sudo.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/scripts/install.sh | bash
 ```
+
+The menu offers install/update, enable/disable, reset and uninstall. It shows installed and target versions. Updates preserve preferences by default; reinstall, reset and uninstall require confirmation. Reset affects only Screenshot Utils preferences and extension-managed shortcuts, requires `dconf`, and keeps GNOME custom shortcuts and screenshot files.
+
+For unattended install/update and enable, use `bash scripts/install.sh --yes` after downloading the script. This never reinstalls, downgrades, resets settings or uninstalls.
 
 Or download the matching ZIP from [Releases](https://github.com/fhaefele/screenshot-utils/releases/latest).
 
@@ -36,7 +40,7 @@ GNOME Shell 45-51:
 gnome-extensions install --force screenshot-utils-modern.shell-extension.zip
 ```
 
-After installing or updating, log out and back in, then enable Screenshot Utils in Extensions.
+After installing or updating, log out and back in to load the new code. The installer offers to enable Screenshot Utils. For manual ZIP installs, enable it in Extensions.
 
 Preferences shows the installed version and checks GitHub for updates when opened, at most once every 24 hours. A `latest: v<version>` link appears only for a newer compatible release and opens its GitHub page. Rerun the installer to update.
 
