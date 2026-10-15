@@ -95,13 +95,15 @@ class CaptureButton extends PanelMenu.Button {
         this._preferencesButton = this._addIconButton(tools, 'emblem-system-symbolic',
             'Preferences', () => extension._openPreferences(), true);
 
-        const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false});
-        // Shell 42-44 reserves an ornament label; newer versions use an icon.
-        for (const row of [menuRow, captureRow, delayRow])
-            row._ornamentLabel?.hide();
+        const controlsRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        controlsRow.x_expand = true;
+        controlsRow.style = 'margin: 0 0 9px; padding-top: 0; padding-bottom: 0;';
+        rows.add_child(controlsRow);
+        const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false, can_focus: false});
         delayRow.x_expand = true;
-        delayRow.style = 'margin: 0 12px 9px;';
-        rows.add_child(delayRow);
+        // Shell 42-44 reserves an ornament label; newer versions use an icon.
+        for (const row of [menuRow, captureRow, controlsRow, delayRow])
+            row._ornamentLabel?.hide();
         this._cursorButton = new St.Button({
             style_class: 'button',
             accessible_name: 'Capture mouse cursor',
@@ -111,7 +113,7 @@ class CaptureButton extends PanelMenu.Button {
             style: 'border-radius: 4px; min-width: 0; min-height: 0; padding: 3px;',
             child: new St.Icon({gicon: createCaptureIcon('cursor'), style_class: 'popup-menu-icon'}),
         });
-        delayRow.add_child(this._cursorButton);
+        controlsRow.add_child(this._cursorButton);
         const cursorTooltip = this._addTooltip(this._cursorButton, 'Capture mouse cursor');
         extension._settings.bind('include-cursor', this._cursorButton, 'checked', Gio.SettingsBindFlags.DEFAULT);
         const syncCursorState = () => {
@@ -120,6 +122,7 @@ class CaptureButton extends PanelMenu.Button {
         };
         this._cursorButton.connect('notify::checked', syncCursorState);
         syncCursorState();
+        controlsRow.add_child(delayRow);
         delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
             y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
@@ -127,7 +130,8 @@ class CaptureButton extends PanelMenu.Button {
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
         this._delaySlider.accessible_name = 'Screenshot delay';
-        this._delayTooltip = this._addTooltip(this._delaySlider, 'Screenshot delay');
+        this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
+        this._delaySlider.label_actor = this._delayTooltip;
         delayRow.add_child(this._delaySlider);
         const syncDelay = () => {
             const milliseconds = extension._settings.get_int('capture-delay-ms');
