@@ -2,10 +2,9 @@
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
-import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import {callAsync} from './async-utils.js';
-import {createSwitchRow, createToggleRow} from './prefs-compat.js';
+import {createSwitchRow} from './prefs-compat.js';
 import {createCaptureIcon} from './capture-icons.js';
 import {CAPTURE_SHORTCUTS, CAPTURE_BUS_PATH, CAPTURE_BUS_INTERFACE, captureCommand, usableShortcut, resetCommandPreferences} from './shortcuts.js';
 
@@ -102,13 +101,7 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     let closed = false;
     let recorder = null;
     let updating = false;
-    let requestingApproval = false;
-    let queuedApproval = false;
-    let requestedAsk = null;
-    let approvalGeneration = 0;
-    let requestedGeneration = 0;
-    let approvalProxy = null;
-    let approvalWait = null;
+    let statusProxy = null;
     const cancellable = new Gio.Cancellable();
     const shortcuts = new Adw.PreferencesGroup({title: 'Keyboard shortcuts'});
     page.add(shortcuts);
@@ -129,81 +122,10 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
     content.append(commands);
     const commandOptions = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list']});
     commands.append(commandOptions);
-    const {row: permissionRow, control: permission} = createToggleRow('Ask for every request');
+    const permissionRow = createSwitchRow(settings, 'ask-command-confirmation', 'Ask for every request');
     permissionRow.subtitle = 'Confirm each screenshot command. When off, any local application can take screenshots by invoking the commands below.';
     commandOptions.append(permissionRow);
     const noteStyle = {xalign: 0, wrap: true, margin_start: 12, margin_end: 12, css_classes: ['dim-label']};
-    const scope = new Gtk.Label({name: 'command-approval-scope', ...noteStyle});
-    commands.append(scope);
-    // Settings notifications and D-Bus calls can arrive in either order.
-    // Wait for Shell to acknowledge the requested permission state.
-    const waitForApprovalReady = () => new Promise((resolve, reject) => {
-        let timeoutId = 0;
-        const finish = error => {
-            approvalWait = null;
-            if (timeoutId)
-                GLib.source_remove(timeoutId);
-            timeoutId = 0;
-            if (error)
-                reject(error);
-            else
-                resolve();
-        };
-        approvalWait = error => {
-            if (error) {
-                finish(error);
-            } else if (closed || !settings.get_boolean('shortcuts-enabled') || settings.get_string('shortcut-setup') !== 'gnome') {
-                finish(new Error('Command approval cancelled'));
-            } else if (approvalProxy) {
-                if (!approvalProxy.get_cached_property('Available')?.get_boolean())
-                    finish(new Error('Extension is disabled'));
-                else if (approvalProxy.get_cached_property('CommandConfigurationAvailable')?.get_boolean())
-                    finish();
-            }
-        };
-        timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 5000, () => {
-            timeoutId = 0;
-            finish(new Error('Shell did not acknowledge command permission'));
-            return GLib.SOURCE_REMOVE;
-        });
-        approvalWait();
-    });
-    const wantsApproval = () => !closed && settings.get_boolean('shortcuts-enabled') && settings.get_string('shortcut-setup') === 'gnome';
-    const requestApproval = async ask => {
-        requestedAsk = ask;
-        requestedGeneration = approvalGeneration;
-        queuedApproval = true;
-        if (requestingApproval || closed)
-            return;
-        requestingApproval = true;
-        sync();
-        try {
-            while (queuedApproval && wantsApproval() && requestedGeneration === approvalGeneration) {
-                queuedApproval = false;
-                try {
-                    const ask = requestedAsk;
-                    const generation = requestedGeneration;
-                    await waitForApprovalReady();
-                    if (queuedApproval || generation !== approvalGeneration)
-                        continue;
-                    if (!wantsApproval())
-                        break;
-                    await callAsync(Gio.DBus.session, 'call', 'org.gnome.Shell', CAPTURE_BUS_PATH,
-                        CAPTURE_BUS_INTERFACE, 'ConfigureCommandConfirmation', new GLib.Variant('(b)', [ask]), null,
-                        Gio.DBusCallFlags.NONE, 5000, cancellable);
-                } catch (error) {
-                    if (!queuedApproval && requestedGeneration === approvalGeneration && wantsApproval() && !cancellable.is_cancelled()) {
-                        console.warn(`Could not request screenshot command approval: ${error.message}`);
-                        window.add_toast(new Adw.Toast({title: 'Could not request approval. Make sure the extension is enabled and idle.'}));
-                    }
-                }
-            }
-        } finally {
-            requestingApproval = false;
-            if (!closed)
-                sync();
-        }
-    };
     const chooseSource = source => {
         settings.set_string('shortcut-setup', source);
         if (source === 'extension')
@@ -216,18 +138,12 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         if (!updating && source && settings.get_string('shortcut-setup') !== source)
             chooseSource(source);
     });
-    permission.connect('notify::active', () => {
-        if (updating)
-            return;
-        const ask = permission.active;
-        if (!requestingApproval && ask === settings.get_boolean('ask-command-confirmation'))
-            return;
-        if (settings.get_boolean('shortcuts-enabled') && settings.get_string('shortcut-setup') === 'gnome')
-            requestApproval(ask);
-    });
-
     const shortcutContent = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 6, margin_top: 6});
     commands.append(shortcutContent);
+    shortcutContent.append(new Gtk.Label({
+        label: 'Keyboard settings → View and customize shortcuts → Custom shortcuts → Add.',
+        selectable: true, ...noteStyle,
+    }));
     const commandRows = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list']});
     shortcutContent.append(commandRows);
     for (const {mode, title} of CAPTURE_SHORTCUTS) {
@@ -244,10 +160,6 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         });
         commandRows.append(createCaptureRow(mode, title, commandField, copy));
     }
-    shortcutContent.append(new Gtk.Label({
-        label: 'Keyboard settings → View and customize shortcuts → Custom shortcuts → Add.',
-        selectable: true, ...noteStyle,
-    }));
     const keyboardSettings = new Gtk.Button({label: 'Keyboard settings', halign: Gtk.Align.END, margin_top: 6});
     keyboardSettings.connect('clicked', () => {
         try {
@@ -298,37 +210,25 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
             chooseSource(sources[0]);
             return;
         }
-        const ask = settings.get_boolean('ask-command-confirmation');
-        const available = approvalProxy?.get_cached_property('Available')?.get_boolean() ?? false;
+        const available = statusProxy?.get_cached_property('Available')?.get_boolean() ?? false;
         updating = true;
         setup.selected = Math.max(0, sources.indexOf(source));
-        const pending = requestingApproval && requestedGeneration === approvalGeneration;
-        permission.active = pending ? requestedAsk : ask;
-        permission.sensitive = !pending;
         updating = false;
         setup.visible = on;
         commands.visible = on && source === 'gnome';
         native.visible = on && source === 'extension';
-        scope.visible = true;
-        const confirmation = ask ? 'Ask for every request' : 'Skip confirmation';
-        const duration = settings.get_string('command-approval-duration') === 'session' ? 'This session' : 'Always';
-        scope.label = `Current setting: ${confirmation} · ${duration}`;
         const assigned = CAPTURE_SHORTCUTS.filter(({key}) => settings.get_string(key));
         const warnings = Object.values(settings.get_value('shortcut-status').deep_unpack());
         status.label = !on ? '' : !available ? 'Extension disabled' : source === 'extension'
             ? warnings.length >= assigned.length && assigned.length ? 'No available shortcuts' : warnings.length ? 'Some shortcuts unavailable' : ''
             : '';
         status.visible = !!status.label;
-        approvalWait?.();
     };
-    for (const key of ['shortcuts-enabled', 'shortcut-setup', 'ask-command-confirmation', 'command-approval-duration', 'shortcut-status',
+    for (const key of ['shortcuts-enabled', 'shortcut-setup', 'shortcut-status',
         ...CAPTURE_SHORTCUTS.map(shortcut => shortcut.key)]) {
         handlers.push([settings, settings.connect(`changed::${key}`, () => {
-            if (key === 'shortcuts-enabled' || key === 'shortcut-setup') {
-                approvalGeneration++;
-                approvalWait?.(new Error('Shortcut setup changed'));
+            if (key === 'shortcuts-enabled' || key === 'shortcut-setup')
                 recorder?.close();
-            }
             sync();
         })]);
     }
@@ -337,20 +237,17 @@ export function fillShortcutPreferences(window, page, settings, handlers) {
         null, 'org.gnome.Shell', CAPTURE_BUS_PATH, CAPTURE_BUS_INTERFACE, cancellable).then(proxy => {
         if (closed)
             return;
-        approvalProxy = proxy;
+        statusProxy = proxy;
         handlers.push([proxy, proxy.connect('g-properties-changed', sync)]);
         sync();
     }).catch(error => {
-        approvalWait?.(error);
         if (!closed && !cancellable.is_cancelled())
             console.warn(`Could not load shortcut status: ${error.message}`);
     });
     return () => {
         closed = true;
-        approvalGeneration++;
-        approvalWait?.(new Error('Preferences closed'));
         cancellable.cancel();
-        approvalProxy = null;
+        statusProxy = null;
         recorder?.close();
     };
 }

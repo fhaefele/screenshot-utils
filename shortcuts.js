@@ -11,10 +11,6 @@ export const CAPTURE_BUS_INTERFACE = 'dev.fxth.ScreenshotUtils';
 export function resetCommandPreferences(settings) {
     if (!settings.get_boolean('ask-command-confirmation'))
         settings.set_boolean('ask-command-confirmation', true);
-    if (settings.get_string('command-approval-duration') !== 'persistent')
-        settings.set_string('command-approval-duration', 'persistent');
-    if (settings.get_boolean('silent-command-approved'))
-        settings.set_boolean('silent-command-approved', false);
 }
 
 export function usableShortcut(accelerator) {

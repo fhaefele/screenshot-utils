@@ -31,7 +31,7 @@
     <key name="shortcuts-enabled" type="b">
       <default>false</default>
       <summary>Enable keyboard shortcuts</summary>
-      <description>Enable the chosen shortcut source. Turning off cancels shortcut captures and revokes command approval.</description>
+      <description>Enable the chosen shortcut source. Turning off cancels pending shortcut captures.</description>
     </key>
     <key name="shortcut-setup" type="s">
       <default>''</default>
@@ -41,18 +41,7 @@
     <key name="ask-command-confirmation" type="b">
       <default>true</default>
       <summary>Ask before screenshots from commands</summary>
-      <description>When false, an explicit Shell approval allows all local applications to request screenshots. Approval lasts for the selected duration. Session approval must be renewed on the first command after logout or Shell restart. Turning access off, changing permissions/source, disabling or uninstalling the extension revokes approval.</description>
-    </key>
-    <key name="command-approval-duration" type="s">
-      <default>'persistent'</default>
-      <choices><choice value="session"/><choice value="persistent"/></choices>
-      <summary>Screenshot command approval duration</summary>
-      <description>Remember Ask or Skip for this session or always. Session choices are confirmed again on first use after logout or Shell restart. Skipping confirmation always requires explicit Shell approval; persistent grants last until revoked.</description>
-    </key>
-    <key name="silent-command-approved" type="b">
-      <default>false</default>
-      <summary>Persistent screenshot command permission</summary>
-      <description>Used with this installation's approval record. Unrestricted local programs can modify saved permissions.</description>
+      <description>When true, confirm each screenshot command. When false, any local application can take screenshots by invoking the commands. This choice persists across logins and Shell restarts.</description>
     </key>
     <key name="shortcut-selection" type="s">
       <default>''</default>
