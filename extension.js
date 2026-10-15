@@ -62,6 +62,7 @@ class CaptureButton extends PanelMenu.Button {
         this._extension = extension;
         this.add_child(new St.Icon({icon_name: 'camera-photo-symbolic', style_class: 'system-status-icon'}));
 
+        const menuPadding = 12;
         const menuRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         menuRow.style = 'padding: 0;';
         const rows = new St.Widget({
@@ -74,6 +75,7 @@ class CaptureButton extends PanelMenu.Button {
         this.menu.addMenuItem(menuRow);
         const captureRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         captureRow.x_expand = true;
+        captureRow.style = `padding: ${menuPadding}px ${menuPadding}px 6px;`;
         rows.add_child(captureRow);
         const captures = new St.Widget({
             x_expand: true,
@@ -102,18 +104,46 @@ class CaptureButton extends PanelMenu.Button {
         this._preferencesButton = this._addIconButton(tools, 'emblem-system-symbolic',
             'Preferences', () => extension._openPreferences(), true);
 
-        const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false});
+        const controlsRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        controlsRow.x_expand = true;
+        controlsRow.style = `margin: 0 0 ${menuPadding}px; padding: 0 ${menuPadding}px;`;
+        rows.add_child(controlsRow);
+        const delayRow = new St.BoxLayout({
+            reactive: true,
+            x_expand: true,
+            style_class: 'popup-inactive-menu-item',
+            style: 'padding: 0; spacing: 0;',
+        });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
-        for (const row of [menuRow, captureRow, delayRow])
+        for (const row of [menuRow, captureRow, controlsRow])
             row._ornamentLabel?.hide();
-        delayRow.x_expand = true;
-        delayRow.style = 'margin: 0 12px 9px;';
-        rows.add_child(delayRow);
-        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon'}));
+        this._cursorButton = new St.Button({
+            style_class: 'button',
+            accessible_name: 'Capture mouse cursor',
+            toggle_mode: true,
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'border-radius: 4px; min-width: 0; min-height: 0; padding: 3px;',
+            child: new St.Icon({gicon: createCaptureIcon('cursor'), style_class: 'popup-menu-icon'}),
+        });
+        controlsRow.add_child(this._cursorButton);
+        const cursorTooltip = this._addTooltip(this._cursorButton, 'Capture mouse cursor');
+        extension._settings.bind('include-cursor', this._cursorButton, 'checked', Gio.SettingsBindFlags.DEFAULT);
+        const syncCursorState = () => {
+            this._cursorButton.child.opacity = this._cursorButton.checked ? 255 : 191;
+            cursorTooltip.text = `Capture mouse cursor: ${this._cursorButton.checked ? 'on' : 'off'}`;
+        };
+        this._cursorButton.connect('notify::checked', syncCursorState);
+        syncCursorState();
+        controlsRow.add_child(delayRow);
+        delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
+            y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
             style: 'min-width: 2.5em; text-align: right;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
+        // Avoid fractional minimum widths losing pixels in older Shell layouts.
+        this._delaySlider.style = 'min-width: 48px; margin-left: 4px;';
         this._delaySlider.accessible_name = 'Screenshot delay';
         this._delayTooltip = this._addTooltip(delayRow, 'Screenshot delay');
         this._delaySlider.label_actor = this._delayTooltip;
@@ -153,7 +183,7 @@ class CaptureButton extends PanelMenu.Button {
             x_expand: true,
             style: utility
                 ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
-                : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
+                : 'border-radius: 8px; min-width: 0; padding: 8px;',
             child: new St.Icon({...(typeof icon === 'string' ? {icon_name: icon} : {gicon: icon}),
                 icon_size: utility ? 16 : 32,
                 x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}),
@@ -165,6 +195,7 @@ class CaptureButton extends PanelMenu.Button {
     }
 
     _addTooltip(actor, text) {
+        actor.track_hover = true;
         const tooltip = new MenuTooltip(actor, {text, style_class: 'screenshot-ui-tooltip', visible: false});
         actor.label_actor = tooltip;
         Main.uiGroup.add_child(tooltip);

@@ -8,6 +8,7 @@ import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
+import {DELAY_STEPS} from '../delay.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
@@ -221,8 +222,9 @@ export async function run() {
         const themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const originalScheme = themeSettings.get_string('color-scheme');
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
-            button._folderButton, button._preferencesButton];
+            button._folderButton, button._preferencesButton, button._cursorButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
+        const colorKey = color => [color.red, color.green, color.blue, color.alpha].join(',');
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
         const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
         try {
@@ -250,6 +252,114 @@ export async function run() {
                     assert(Math.abs(width - sizes[index][0]) < 1 && Math.abs(height - sizes[index][1]) < 1,
                         'Switching color scheme changed capture control geometry');
                 });
+                const cursor = button._cursorButton;
+                const delayRow = button._delaySlider.get_parent();
+                const controlsRow = cursor.get_parent();
+                const clock = delayRow.get_children().find(actor => actor.visible && actor instanceof St.Icon);
+                const [cursorWidth, cursorHeight] = cursor.child.get_transformed_size();
+                const [clockWidth, clockHeight] = clock.get_transformed_size();
+                assert(cursorWidth === clockWidth && cursorHeight === clockHeight,
+                    `Cursor and clock icons have different sizes: ${cursorWidth}x${cursorHeight} vs ${clockWidth}x${clockHeight}`);
+                const menuWidth = button.menu.actor.width;
+                const rowWidth = controlsRow.width;
+                const delay = settings.get_int('capture-delay-ms');
+                cursor.hide();
+                await Scripting.sleep(50);
+                const baselineSliderWidth = button._delaySlider.width;
+                const baselineRowSize = controlsRow.get_transformed_size();
+                cursor.show();
+                await Scripting.sleep(50);
+                assert(button.menu.actor.width === menuWidth && controlsRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
+                'Cursor toggle should shorten the slider without widening the menu or delay row');
+                const [cursorX, cursorY] = cursor.get_transformed_position();
+                const [selectionX, selectionY] = button._selectionButton.get_transformed_position();
+                const [delayX] = delayRow.get_transformed_position();
+                const [clockX] = clock.get_transformed_position();
+                const [sliderX] = button._delaySlider.get_transformed_position();
+                assert(Math.abs(cursorX - selectionX) < 1,
+                    'Cursor toggle is not aligned with the selection button');
+                assert(delayX > cursorX + cursor.width && clockX >= delayX &&
+                    clockX - cursorX - cursor.width <= 8,
+                'Cursor and clock need a small, non-overlapping gap');
+                const [labelX] = button._delayLabel.get_transformed_position();
+                assert(labelX - clockX - clockWidth <= 4 && labelX >= clockX + clockWidth,
+                    'Clock and delay text are too far apart or overlap');
+                const rowGap = cursorY - selectionY - button._selectionButton.height;
+                assert(rowGap >= 0 && rowGap <= 8, 'Capture and bottom controls need a compact gap');
+                const [boxX, boxY] = button.menu.box.get_transformed_position();
+                const [boxWidth, boxHeight] = button.menu.box.get_transformed_size();
+                const topEdge = Math.min(...controls.filter(actor => actor !== cursor)
+                    .map(actor => actor.get_transformed_position()[1]));
+                const insets = [selectionX - boxX, topEdge - boxY,
+                    boxX + boxWidth - sliderX - button._delaySlider.width,
+                    boxY + boxHeight - cursorY - cursor.height];
+                assert(Math.max(...insets) - Math.min(...insets) < 1,
+                    `Outer menu padding differs between edges: ${insets.join(', ')}; ` +
+                    `delay=${delayRow.width}, slider=${sliderX}/${button._delaySlider.width}/${button._delaySlider.get_transformed_size()[0]}`);
+                const delayActors = [clock, button._delayLabel];
+                const delayColors = delayActors.map(actor => colorKey(actor.get_theme_node().get_foreground_color()));
+                const menuForeground = colorKey(button.menu.box.get_theme_node().get_foreground_color());
+                assert(delayColors.every(color => color === menuForeground),
+                    'Clock or delay text does not use the normal menu foreground');
+                const menuBackground = luminance(button.menu.box.get_theme_node().get_background_color());
+                assert(delayActors.every(actor => {
+                    const foreground = luminance(actor.get_theme_node().get_foreground_color());
+                    return Math.abs(foreground - menuBackground) > 40 && (!supportsColorScheme ||
+                        (scheme === 'prefer-light' ? foreground < menuBackground : foreground > menuBackground));
+                }), 'Clock or delay text has poor contrast with the menu theme');
+                await movePointer(pointer, cursorX + cursor.width / 2, cursorY + cursor.height / 2);
+                await waitUntil(() => cursor.hover && !delayRow.hover && !controlsRow.active,
+                    'Hovering the cursor highlights the delay controls or whole row');
+                await Scripting.sleep(150);
+                await preview(`hover-cursor-${scheme}.png`);
+                const [, sliderY] = button._delaySlider.get_transformed_position();
+                await movePointer(pointer, sliderX + button._delaySlider.width / 2,
+                    sliderY + button._delaySlider.height / 2);
+                await waitUntil(() => delayRow.hover && !cursor.hover && !controlsRow.active,
+                    'Delay hover did not stay separate from the cursor and outer row');
+                await Scripting.sleep(150);
+                assert(delayRow.get_theme_node().get_background_color().alpha === 0,
+                    'Hovering the delay controls shows a background highlight');
+                assert(delayActors.every((actor, index) =>
+                    colorKey(actor.get_theme_node().get_foreground_color()) === delayColors[index]),
+                'Hovering delay changes the clock or text color');
+                await preview(`hover-delay-${scheme}.png`);
+                const savedDelay = settings.get_int('capture-delay-ms');
+                const unitPositions = [];
+                for (const milliseconds of DELAY_STEPS) {
+                    settings.set_int('capture-delay-ms', milliseconds);
+                    await Scripting.sleep(30);
+                    const text = button._delayLabel.clutter_text;
+                    const [success, unitX] = text.position_to_coords(button._delayLabel.text.length - 1);
+                    assert(success, 'Could not measure the delay unit position');
+                    unitPositions.push(button._delayLabel.get_transformed_position()[0] + unitX);
+                    if (milliseconds === 100)
+                        await preview(`delay-100ms-${scheme}.png`);
+                }
+                settings.set_int('capture-delay-ms', savedDelay);
+                assert(Math.max(...unitPositions) - Math.min(...unitPositions) < 1,
+                    `Delay unit moved when changing values: ${unitPositions.join(', ')}`);
+                const backgrounds = [];
+                for (const enabled of [false, true]) {
+                    settings.set_boolean('include-cursor', enabled);
+                    await waitUntil(() => cursor.checked === enabled,
+                        'Preferences cursor setting did not update the menu toggle');
+                    await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
+                    await Scripting.sleep(250);
+                    const background = cursor.get_theme_node().get_background_color();
+                    backgrounds.push(colorKey(background));
+                    assert(cursor.label_actor.text === `Capture mouse cursor: ${enabled ? 'on' : 'off'}`,
+                        'Cursor tooltip does not describe the current setting');
+                    await preview(`menu-${scheme}-cursor-${enabled ? 'on' : 'off'}.png`);
+                    await click(pointer, cursor);
+                    assert(settings.get_boolean('include-cursor') === !enabled && cursor.checked === !enabled,
+                        'Cursor toggle did not update the screenshot preference');
+                    assert(button.menu.isOpen && settings.get_int('capture-delay-ms') === delay,
+                        'Cursor toggle closed the menu or changed the delay');
+                    assert(button.menu.actor.width === menuWidth && controlsRow.width === rowWidth,
+                        'Cursor toggle changed the menu boundaries');
+                }
+                assert(backgrounds[0] !== backgrounds[1], 'Cursor toggle has no visible checked state');
                 await preview(`menu-${scheme}.png`);
             }
         } finally {
@@ -286,8 +396,9 @@ export async function run() {
         await Scripting.sleep(30);
         const delayControls = slider.get_parent().get_children().filter(actor => actor.visible);
         assert(delayControls.length === 3 && delayControls[0] instanceof St.Icon &&
-            delayControls[1] === button._delayLabel && delayControls[2] === slider,
-        'Delay row should contain clock, time and slider');
+            delayControls[1] === button._delayLabel && delayControls[2] === slider &&
+            button._cursorButton.get_parent() === slider.get_parent().get_parent(),
+        'Cursor toggle should sit beside a separate clock, time and slider area');
         const savedDelay = settings.get_int('capture-delay-ms');
         for (const actor of delayControls.slice(0, 2)) {
             assert(!actor.reactive && !actor.can_focus, 'Clock and time must be read-only');
@@ -303,12 +414,13 @@ export async function run() {
         await Scripting.sleep(20);
         assert(Math.abs(button._delaySlider.value - 0.4) < 0.001 && button._delayTooltip.text === 'Screenshot delay: 1 s',
             'Preferences delay did not update the panel slider');
-        for (const [actor, name] of [[button._folderButton, 'folder'],
-            [button._preferencesButton, 'preferences'], [slider, 'delay']]) {
+        for (const [actor, name, sharedTooltip] of [[button._cursorButton, 'cursor'], [button._folderButton, 'folder'],
+            [button._preferencesButton, 'preferences'], [delayControls[0], 'delay-clock', button._delayTooltip],
+            [button._delayLabel, 'delay-time', button._delayTooltip], [slider, 'delay']]) {
             const [x, y] = actor.get_transformed_position();
             const [width, height] = actor.get_transformed_size();
             await movePointer(pointer, x + width / 2, y + height / 2);
-            const tooltip = actor.label_actor;
+            const tooltip = sharedTooltip ?? actor.label_actor;
             await waitUntil(() => tooltip.visible && tooltip.opacity === 255, `Missing ${name} hover tooltip`);
             assert(tooltip.y >= y + height && tooltip.y > Main.panel.get_transformed_size()[1],
                 `${name} tooltip overlaps the top bar or hovered control`);
@@ -329,7 +441,7 @@ export async function run() {
             extension.openPreferences = realOpenPreferences;
         }
         assert(!button.menu.isOpen, 'Preferences action left the menu open');
-        assert([button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
+        assert([button._cursorButton, button._folderButton, button._preferencesButton, slider].every(actor => !actor.label_actor.visible),
             'A tooltip remained visible after closing the menu');
         print('PASS: icon menu, preferences action and delay slider synchronization');
 
