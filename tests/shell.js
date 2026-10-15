@@ -589,6 +589,31 @@ export async function run() {
             await click(pointer, extension._commandDialog._allowButton);
             await waitUntil(() => !extension._commandDialog, 'Command confirmation did not close');
         };
+        const rejectDelayedModal = async (trigger, name) => {
+            const previousDelay = settings.get_int('capture-delay-ms');
+            const previousTemplate = settings.get_string('filename-template');
+            const modal = new St.Widget({reactive: true});
+            Main.uiGroup.add_child(modal);
+            let grab = null;
+            try {
+                settings.set_int('capture-delay-ms', 1000);
+                settings.set_string('filename-template', `${name}-{N}`);
+                await trigger();
+                await waitUntil(() => extension._busy && extension._run.pending.size > 0,
+                    'Shortcut capture did not start before the modal');
+                grab = Main.pushModal(modal);
+                assert(grab, 'Test could not grab delayed modal input');
+                await waitUntil(() => !extension._busy, 'Delayed shortcut capture did not stop for the modal');
+                assert(!directory.get_child(`${name}-screen.png`).query_exists(null),
+                    'Delayed shortcut captured a newly opened Shell modal');
+            } finally {
+                if (grab)
+                    Main.popModal(grab);
+                modal.destroy();
+                settings.set_int('capture-delay-ms', previousDelay);
+                settings.set_string('filename-template', previousTemplate);
+            }
+        };
         // Ask is on by default and requires a separate gesture for each command.
         settings.set_int('capture-delay-ms', 0);
         settings.set_boolean('mute-screenshot-sound', true);
@@ -758,6 +783,7 @@ export async function run() {
         extension = Main.panel.statusArea[UUID]._extension;
         assert(!settings.get_boolean('ask-command-confirmation'), 'Re-enabling forgot the saved Ask choice');
         await skipCapture('Skip-reenabled');
+        await rejectDelayedModal(() => requestCapture('screen'), 'Command-modal');
         settings.set_boolean('ask-command-confirmation', true);
         assert(!extension._commandDialog, 'Turning Ask on opened a setup dialog');
         settings.set_string('filename-template', 'Ask-repeat-{N}');
@@ -831,6 +857,8 @@ export async function run() {
             'Native screen keypress did not capture');
         assert(!extension._commandDialog, 'Native keypress opened command confirmation');
         checkPng(directory, 'Native-screen.png');
+        await rejectDelayedModal(() => pressShortcut(Clutter.KEY_F10), 'Native-modal');
+        print('PASS: delayed command and native captures reject newly opened Shell modals');
         await pressShortcut(Clutter.KEY_F11);
         await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native selection keypress did not open selection');
         keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);

@@ -340,6 +340,14 @@ export default class ScreenshotUtilsExtension extends Extension {
             throw new Error('Screenshot controls are unavailable');
         if (this._lockdownSettings.get_boolean('disable-save-to-disk'))
             throw new Error('Saving screenshots is disabled by system policy');
+        if (command !== null) {
+            const ownModals = Number(this._button?.menu.isOpen ?? false) +
+                Number(this._commandDialog?._hasModal ?? false) +
+                Number(this._windowSession?._hasModal ?? false) +
+                Number(this._selector?._grabHelper.grabbed ?? false);
+            if (Main.modalCount > ownModals)
+                throw new Error('Screenshot controls are unavailable');
+        }
     }
 
     _requestCapture(mode, invocation) {
