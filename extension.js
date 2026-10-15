@@ -55,6 +55,7 @@ class CaptureButton extends PanelMenu.Button {
         this._extension = extension;
         this.add_child(new St.Icon({icon_name: 'camera-photo-symbolic', style_class: 'system-status-icon'}));
 
+        const menuPadding = 12;
         const menuRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         menuRow.style = 'padding: 0;';
         const rows = new St.Widget({
@@ -67,6 +68,7 @@ class CaptureButton extends PanelMenu.Button {
         this.menu.addMenuItem(menuRow);
         const captureRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         captureRow.x_expand = true;
+        captureRow.style = `padding: ${menuPadding}px ${menuPadding}px 6px;`;
         rows.add_child(captureRow);
         const captures = new St.Widget({
             x_expand: true,
@@ -97,12 +99,16 @@ class CaptureButton extends PanelMenu.Button {
 
         const controlsRow = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         controlsRow.x_expand = true;
-        controlsRow.style = 'margin: 0 0 9px; padding-top: 0; padding-bottom: 0;';
+        controlsRow.style = `margin: 0 0 ${menuPadding}px; padding: 0 ${menuPadding}px;`;
         rows.add_child(controlsRow);
-        const delayRow = new PopupMenu.PopupBaseMenuItem({activate: false, can_focus: false});
-        delayRow.x_expand = true;
+        const delayRow = new St.BoxLayout({
+            reactive: true,
+            x_expand: true,
+            style_class: 'popup-menu-item',
+            style: `background-color: transparent; padding: 0 0 0 ${menuPadding}px; spacing: 4px;`,
+        });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
-        for (const row of [menuRow, captureRow, controlsRow, delayRow])
+        for (const row of [menuRow, captureRow, controlsRow])
             row._ornamentLabel?.hide();
         this._cursorButton = new St.Button({
             style_class: 'button',
@@ -126,7 +132,7 @@ class CaptureButton extends PanelMenu.Button {
         delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
             y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
-            style: 'min-width: 2.5em; text-align: right;'});
+            style: 'min-width: 2.5em; text-align: left;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
         this._delaySlider.accessible_name = 'Screenshot delay';

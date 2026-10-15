@@ -244,26 +244,41 @@ export async function run() {
                 assert(button.menu.actor.width === menuWidth && controlsRow.width === baselineRowSize[0] && button._delaySlider.width < baselineSliderWidth,
                 'Cursor toggle should shorten the slider without widening the menu or delay row');
                 const [cursorX, cursorY] = cursor.get_transformed_position();
-                const [selectionX] = button._selectionButton.get_transformed_position();
+                const [selectionX, selectionY] = button._selectionButton.get_transformed_position();
                 const [delayX] = delayRow.get_transformed_position();
                 const [clockX] = clock.get_transformed_position();
                 const [sliderX] = button._delaySlider.get_transformed_position();
                 assert(Math.abs(cursorX - selectionX) < 1,
                     'Cursor toggle is not aligned with the selection button');
-                assert(delayX > cursorX + cursor.width && clockX > delayX &&
-                    sliderX + button._delaySlider.width < delayX + delayRow.width,
-                'Cursor and delay areas need an empty gap and padding inside the delay highlight');
+                assert(delayX > cursorX + cursor.width && clockX > delayX,
+                    'Cursor-to-clock spacing lost its gap or leading padding');
+                const [labelX] = button._delayLabel.get_transformed_position();
+                assert(labelX - clockX - clockWidth <= 4 && labelX >= clockX + clockWidth,
+                    'Clock and delay text are too far apart or overlap');
+                const rowGap = cursorY - selectionY - button._selectionButton.height;
+                assert(rowGap >= 0 && rowGap <= 8, 'Capture and bottom controls need a compact gap');
+                const [boxX, boxY] = button.menu.box.get_transformed_position();
+                const [boxWidth, boxHeight] = button.menu.box.get_transformed_size();
+                const topEdge = Math.min(...controls.filter(actor => actor !== cursor)
+                    .map(actor => actor.get_transformed_position()[1]));
+                const insets = [selectionX - boxX, topEdge - boxY,
+                    boxX + boxWidth - sliderX - button._delaySlider.width,
+                    boxY + boxHeight - cursorY - cursor.height];
+                assert(Math.max(...insets) - Math.min(...insets) < 1,
+                    `Outer menu padding differs between edges: ${insets.join(', ')}`);
                 await movePointer(pointer, cursorX + cursor.width / 2, cursorY + cursor.height / 2);
-                await waitUntil(() => cursor.hover && !delayRow.active && !controlsRow.active,
+                await waitUntil(() => cursor.hover && !delayRow.hover && !controlsRow.active,
                     'Hovering the cursor highlights the delay controls or whole row');
                 await Scripting.sleep(150);
                 await preview(`hover-cursor-${scheme}.png`);
                 const [, sliderY] = button._delaySlider.get_transformed_position();
                 await movePointer(pointer, sliderX + button._delaySlider.width / 2,
                     sliderY + button._delaySlider.height / 2);
-                await waitUntil(() => delayRow.active && !cursor.hover && !controlsRow.active,
-                    'Hovering the delay highlights the cursor or whole row');
+                await waitUntil(() => delayRow.hover && !cursor.hover && !controlsRow.active,
+                    'Delay hover did not stay separate from the cursor and outer row');
                 await Scripting.sleep(150);
+                assert(delayRow.get_theme_node().get_background_color().alpha === 0,
+                    'Hovering the delay controls shows a background highlight');
                 await preview(`hover-delay-${scheme}.png`);
                 const backgrounds = [];
                 for (const enabled of [false, true]) {
