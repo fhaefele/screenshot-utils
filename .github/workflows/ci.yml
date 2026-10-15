@@ -6,6 +6,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
@@ -16,6 +17,7 @@ concurrency:
 
 jobs:
   changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     outputs:
@@ -53,7 +55,10 @@ jobs:
 
   build:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+          (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -95,7 +100,10 @@ jobs:
 
   integration:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+          (needs.changes.result != 'success' || needs.changes.outputs.extension != 'false') }}
     strategy:
       fail-fast: false
       matrix:
