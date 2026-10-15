@@ -123,7 +123,7 @@ class CaptureButton extends PanelMenu.Button {
         const cursorTooltip = this._addTooltip(this._cursorButton, 'Capture mouse cursor');
         extension._settings.bind('include-cursor', this._cursorButton, 'checked', Gio.SettingsBindFlags.DEFAULT);
         const syncCursorState = () => {
-            this._cursorButton.child.opacity = this._cursorButton.checked ? 255 : 160;
+            this._cursorButton.child.opacity = this._cursorButton.checked ? 255 : 191;
             cursorTooltip.text = `Capture mouse cursor: ${this._cursorButton.checked ? 'on' : 'off'}`;
         };
         this._cursorButton.connect('notify::checked', syncCursorState);
