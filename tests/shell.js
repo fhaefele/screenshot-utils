@@ -197,6 +197,7 @@ export async function run() {
         const controls = [button._selectionButton, button._screenButton, button._windowButton,
             button._folderButton, button._preferencesButton, button._cursorButton];
         const sizes = controls.map(actor => actor.get_transformed_size());
+        const colorKey = color => [color.red, color.green, color.blue, color.alpha].join(',');
         const luminance = color => 0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue;
         const supportsColorScheme = Number(Config.PACKAGE_VERSION.split('.')[0]) >= 48;
         try {
@@ -265,7 +266,19 @@ export async function run() {
                     boxX + boxWidth - sliderX - button._delaySlider.width,
                     boxY + boxHeight - cursorY - cursor.height];
                 assert(Math.max(...insets) - Math.min(...insets) < 1,
-                    `Outer menu padding differs between edges: ${insets.join(', ')}`);
+                    `Outer menu padding differs between edges: ${insets.join(', ')}; ` +
+                    `delay=${delayRow.width}, slider=${sliderX}/${button._delaySlider.width}/${button._delaySlider.get_transformed_size()[0]}`);
+                const delayActors = [clock, button._delayLabel];
+                const delayColors = delayActors.map(actor => colorKey(actor.get_theme_node().get_foreground_color()));
+                const menuForeground = colorKey(button.menu.box.get_theme_node().get_foreground_color());
+                assert(delayColors.every(color => color === menuForeground),
+                    'Clock or delay text does not use the normal menu foreground');
+                const menuBackground = luminance(button.menu.box.get_theme_node().get_background_color());
+                assert(delayActors.every(actor => {
+                    const foreground = luminance(actor.get_theme_node().get_foreground_color());
+                    return Math.abs(foreground - menuBackground) > 40 && (!supportsColorScheme ||
+                        (scheme === 'prefer-light' ? foreground < menuBackground : foreground > menuBackground));
+                }), 'Clock or delay text has poor contrast with the menu theme');
                 await movePointer(pointer, cursorX + cursor.width / 2, cursorY + cursor.height / 2);
                 await waitUntil(() => cursor.hover && !delayRow.hover && !controlsRow.active,
                     'Hovering the cursor highlights the delay controls or whole row');
@@ -279,7 +292,23 @@ export async function run() {
                 await Scripting.sleep(150);
                 assert(delayRow.get_theme_node().get_background_color().alpha === 0,
                     'Hovering the delay controls shows a background highlight');
+                assert(delayActors.every((actor, index) =>
+                    colorKey(actor.get_theme_node().get_foreground_color()) === delayColors[index]),
+                'Hovering delay changes the clock or text color');
                 await preview(`hover-delay-${scheme}.png`);
+                const savedDelay = settings.get_int('capture-delay-ms');
+                const unitPositions = [];
+                for (const milliseconds of [0, 1000, 25000]) {
+                    settings.set_int('capture-delay-ms', milliseconds);
+                    await Scripting.sleep(30);
+                    const text = button._delayLabel.clutter_text;
+                    const [success, unitX] = text.position_to_coords(button._delayLabel.text.length - 1);
+                    assert(success, 'Could not measure the delay unit position');
+                    unitPositions.push(button._delayLabel.get_transformed_position()[0] + unitX);
+                }
+                settings.set_int('capture-delay-ms', savedDelay);
+                assert(Math.max(...unitPositions) - Math.min(...unitPositions) < 1,
+                    `Delay unit moved when changing values: ${unitPositions.join(', ')}`);
                 const backgrounds = [];
                 for (const enabled of [false, true]) {
                     settings.set_boolean('include-cursor', enabled);
@@ -288,7 +317,7 @@ export async function run() {
                     await movePointer(pointer, global.stage.width / 2, global.stage.height / 2);
                     await Scripting.sleep(250);
                     const background = cursor.get_theme_node().get_background_color();
-                    backgrounds.push([background.red, background.green, background.blue, background.alpha].join(','));
+                    backgrounds.push(colorKey(background));
                     assert(cursor.label_actor.text === `Capture mouse cursor: ${enabled ? 'on' : 'off'}`,
                         'Cursor tooltip does not describe the current setting');
                     await preview(`menu-${scheme}-cursor-${enabled ? 'on' : 'off'}.png`);

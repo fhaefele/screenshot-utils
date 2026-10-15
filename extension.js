@@ -104,8 +104,8 @@ class CaptureButton extends PanelMenu.Button {
         const delayRow = new St.BoxLayout({
             reactive: true,
             x_expand: true,
-            style_class: 'popup-menu-item',
-            style: `background-color: transparent; padding: 0 0 0 ${menuPadding}px; spacing: 4px;`,
+            style_class: 'popup-inactive-menu-item',
+            style: `padding: 0 0 0 ${menuPadding}px; spacing: 4px;`,
         });
         // Shell 42-44 reserves an ornament label; newer versions use an icon.
         for (const row of [menuRow, captureRow, controlsRow])
@@ -132,7 +132,7 @@ class CaptureButton extends PanelMenu.Button {
         delayRow.add_child(new St.Icon({icon_name: 'alarm-symbolic', style_class: 'popup-menu-icon',
             y_align: Clutter.ActorAlign.CENTER}));
         this._delayLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER,
-            style: 'min-width: 2.5em; text-align: left;'});
+            style: 'min-width: 2.5em; text-align: right;'});
         delayRow.add_child(this._delayLabel);
         this._delaySlider = new Slider(delayToSlider(extension._settings.get_int('capture-delay-ms')));
         this._delaySlider.accessible_name = 'Screenshot delay';
@@ -174,7 +174,7 @@ class CaptureButton extends PanelMenu.Button {
             x_expand: true,
             style: utility
                 ? 'border-radius: 4px; min-width: 0; min-height: 16px; padding: 3px;'
-                : 'border-radius: 8px; min-width: 48px; padding: 8px 12px;',
+                : 'border-radius: 8px; min-width: 0; padding: 8px;',
             child: new St.Icon({...(typeof icon === 'string' ? {icon_name: icon} : {gicon: icon}),
                 icon_size: utility ? 16 : 32,
                 x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}),
