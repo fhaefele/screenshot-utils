@@ -21,8 +21,7 @@ import {callAsync} from './async-utils.js';
 import {ensureDirectory, ensureSaveLocation, getSavePath} from './location.js';
 import {delayToSlider, sliderToDelay, formatDelay} from './delay.js';
 import {createCaptureIcon} from './capture-icons.js';
-import {ShortcutManager} from './shortcut-manager.js';
-import {CAPTURE_BUS_PATH, resetCommandPreferences} from './shortcuts.js';
+import {CAPTURE_BUS_PATH, migrateShortcutSettings} from './shortcuts.js';
 
 const SHELL_MAJOR = Number(Config.PACKAGE_VERSION.split('.')[0]);
 const CAPTURE_SOUND = `${global.datadir}/sounds/screen-capture.oga`;
@@ -232,13 +231,12 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._locationChangedId = this._settings.connect('changed::save-location',
             () => ensureSaveLocation(this._settings));
         this._run = {cancellable: new Gio.Cancellable(), pending: new Set(), commandEpoch: 0};
-        if (this._settings.get_string('shortcut-setup') === 'extension')
-            resetCommandPreferences(this._settings);
+        migrateShortcutSettings(this._settings);
         this._commandDialog = null;
         this._commandSettingIds = ['shortcuts-enabled', 'ask-command-confirmation', 'shortcut-setup']
             .map(key => this._settings.connect(`changed::${key}`, () => {
-                if (key === 'shortcut-setup' && this._settings.get_string(key) === 'extension')
-                    resetCommandPreferences(this._settings);
+                if (key === 'shortcut-setup')
+                    migrateShortcutSettings(this._settings);
                 this._invalidateCommandRequests();
             }));
         this._busy = false;
@@ -249,11 +247,6 @@ export default class ScreenshotUtilsExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._button);
         this._injectionManager = new InjectionManager();
         this._patchScreenshotSound();
-        this._shortcuts = new ShortcutManager(this._settings, mode => {
-            const command = {native: this._shortcuts, epoch: this._shortcuts.epoch};
-            this._captureMode(mode, command).catch(error => this._notify(`Screenshot failed: ${error.message}`));
-        }, () => this._cancelCapturesMatching(command => command?.native === this._shortcuts));
-        this._shortcuts.enable();
         const extension = this;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(CAPTURE_INTERFACE, {
             CaptureAsync: ([mode], invocation) => this._requestCapture(mode, invocation),
@@ -272,8 +265,6 @@ export default class ScreenshotUtilsExtension extends Extension {
         this._dbus?.flush();
         this._dbus?.unexport();
         this._dbus = null;
-        this._shortcuts?.destroy();
-        this._shortcuts = null;
         run?.cancellable.cancel();
         for (const cancel of run?.pending ?? [])
             cancel();
@@ -307,14 +298,7 @@ export default class ScreenshotUtilsExtension extends Extension {
 
     _checkCommandAllowed(run, command) {
         this._checkActive(run);
-        if (command?.native) {
-            if (command.native !== this._shortcuts || command.epoch !== this._shortcuts.epoch ||
-                !this._shortcuts.active)
-                throw new Error('Screenshot shortcut permission was revoked');
-            return;
-        }
         if (command !== null && (command !== run.commandEpoch ||
-            this._settings.get_string('shortcut-setup') !== 'gnome' ||
             !this._settings.get_boolean('shortcuts-enabled')))
             throw new Error('Screenshot command permission was revoked');
     }
@@ -325,16 +309,12 @@ export default class ScreenshotUtilsExtension extends Extension {
         // A queued off/on notification still cancels the old request.
         this._run.commandEpoch++;
         this._cancelCommandDialog();
-        this._cancelCapturesMatching(command => typeof command === 'number');
-    }
-
-    _cancelCapturesMatching(matches) {
-        if (this._selector && matches(this._selector.command))
+        if (typeof this._selector?.command === 'number')
             this._cancelSelector();
-        if (this._windowSession && matches(this._windowSession.command))
+        if (typeof this._windowSession?.command === 'number')
             this._cancelWindowUi();
-        for (const cancel of this._run?.pending ?? []) {
-            if (matches(cancel.command))
+        for (const cancel of this._run.pending) {
+            if (typeof cancel.command === 'number')
                 cancel();
         }
     }
@@ -356,10 +336,9 @@ export default class ScreenshotUtilsExtension extends Extension {
     }
 
     _requestCapture(mode, invocation) {
-        if (!this._settings?.get_boolean('shortcuts-enabled') ||
-            this._settings.get_string('shortcut-setup') !== 'gnome') {
+        if (!this._settings?.get_boolean('shortcuts-enabled')) {
             invocation.return_dbus_error('dev.fxth.ScreenshotUtils.Unavailable',
-                'Use GNOME keyboard settings mode and enable keyboard shortcuts in preferences first');
+                'Enable keyboard shortcuts in preferences first');
             return;
         }
         if (!['selection', 'screen', 'window'].includes(mode)) {

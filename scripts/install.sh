@@ -144,10 +144,10 @@ PY
     fi
 
     reset_settings() {
-        if confirm 'Reset Screenshot Utils preferences and extension-managed shortcuts?' N; then
+        if confirm 'Reset Screenshot Utils preferences?' N; then
             require dconf
             dconf reset -f /org/gnome/shell/extensions/screenshot-utils/ || fail 'Could not reset preferences.'
-            printf 'Preferences and extension-managed shortcuts reset.\n'
+            printf 'Preferences reset.\n'
         else
             printf 'Preferences and shortcuts kept.\n'
         fi
