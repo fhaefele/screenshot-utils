@@ -4,7 +4,6 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
-import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ensureDirectory} from '../location.js';
@@ -190,11 +189,7 @@ export async function run() {
         const deniedCommand = await requestCapture('screen').then(() => null, error => error);
         assert(Gio.DBusError.get_remote_error(deniedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable' && !extension._busy,
             'Capture API accepted a command without permission');
-        assert(settings.get_string('shortcut-setup') === '', 'A shortcut source was selected by default');
         settings.set_boolean('shortcuts-enabled', true);
-        const noSource = await requestCapture('screen').then(() => null, error => error);
-        assert(Gio.DBusError.get_remote_error(noSource) === 'dev.fxth.ScreenshotUtils.Unavailable', 'Enabled switch bypassed source selection');
-        settings.set_string('shortcut-setup', 'gnome');
         print('PASS: screenshot command access requires explicit opt-in');
         const button = Main.panel.statusArea[UUID];
         assert(!button._nativeUiButton, 'Redundant native screenshot UI button is present');
@@ -861,108 +856,19 @@ export async function run() {
         // Refresh the helper's inactivity timeout before using its windows again.
         await Scripting.waitTestWindows();
 
-        settings.set_string('filename-template', 'Native-{N}');
-        settings.set_boolean('ask-command-confirmation', false);
-        settings.set_string('shortcut-setup', 'extension');
-        assert(settings.get_boolean('ask-command-confirmation'), 'Native source retained the GNOME Skip setting');
-        settings.set_string('shortcut-screen', 'a');
-        assert(settings.get_string('shortcut-screen') === '' && !extension._shortcuts.bindings.has('screen'),
-            'External preference registered a plain typing key');
-        settings.set_string('shortcut-screen', '<Control><Shift>F10');
-        assert(extension._shortcuts.bindings.has('screen'), 'Free native shortcut did not register');
-        const originalScreenBinding = settings.get_string('shortcut-screen');
-        settings.set_string('shortcut-selection', originalScreenBinding);
-        assert(!extension._shortcuts.bindings.has('selection') && settings.get_string('shortcut-selection') === '' &&
-            settings.get_value('shortcut-status').deep_unpack().selection, 'Duplicate native shortcut was accepted');
-        const wmKeys = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.keybindings'});
-        const switchApps = wmKeys.get_strv('switch-applications');
-        assert(switchApps.length > 0, 'No predefined system shortcut for conflict test');
-        settings.set_string('shortcut-screen', switchApps[0]);
-        assert(settings.get_string('shortcut-screen') === originalScreenBinding &&
-            JSON.stringify(wmKeys.get_strv('switch-applications')) === JSON.stringify(switchApps),
-        'Native conflict replaced a previous or system assignment');
-        settings.set_string('shortcut-selection', '<Control><Shift>F11');
-        settings.set_string('shortcut-window', '<Control><Shift>F12');
-        const blockedCommand = await requestCapture('screen').then(() => null, error => error);
-        assert(Gio.DBusError.get_remote_error(blockedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable',
-            'Extension shortcut mode accepted an external capture command');
-        const pressShortcut = async key => {
-            for (const modifier of [Clutter.KEY_Control_L, Clutter.KEY_Shift_L])
-                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.PRESSED);
-            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
-            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
-            for (const modifier of [Clutter.KEY_Shift_L, Clutter.KEY_Control_L])
-                keyboard.notify_keyval(GLib.get_monotonic_time(), modifier, Clutter.KeyState.RELEASED);
-            await Scripting.sleep(30);
-        };
-        Main.overview.show();
-        await waitUntil(() => Main.overview.visible && !Main.overview.animationInProgress,
-            'Overview did not open for native shortcut exclusion');
-        await pressShortcut(Clutter.KEY_F10);
-        await Scripting.sleep(100);
-        assert(!extension._busy && !directory.get_child('Native-screen.png').query_exists(null),
-            'Native shortcut captured while Overview owned a modal grab');
-        Main.overview.hide();
-        await waitUntil(() => !Main.overview.visible && !Main.overview.animationInProgress,
-            'Overview did not close after native shortcut exclusion');
-        await pressShortcut(Clutter.KEY_F10);
-        await waitUntil(() => directory.get_child('Native-screen.png').query_exists(null) && !extension._busy,
-            'Native screen keypress did not capture');
-        assert(!extension._commandDialog, 'Native keypress opened command confirmation');
-        checkPng(directory, 'Native-screen.png');
-        await rejectDelayedModal(() => pressShortcut(Clutter.KEY_F10), 'Native-modal');
-        print('PASS: delayed command and native captures reject newly opened Shell modals');
-        await pressShortcut(Clutter.KEY_F11);
-        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native selection keypress did not open selection');
-        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
-        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
-        await waitUntil(() => !extension._selector, 'Native selection did not cancel');
-        await pressShortcut(Clutter.KEY_F12);
-        await waitUntil(() => extension._windowSession?.visible, 'Native window keypress did not open window picker');
-        await Scripting.sleep(250);
-        await click(pointer, extension._windowSession.windows.keys().next().value);
-        await waitUntil(() => !extension._windowSession && !extension._busy, 'Native window capture did not finish');
-        checkPng(directory, 'Native-window.png');
-        settings.set_string('filename-template', 'Native-revoked-{N}');
-        settings.set_int('capture-delay-ms', 1000);
-        await pressShortcut(Clutter.KEY_F10);
-        await waitUntil(() => extension._busy && extension._run.pending.size > 0, 'Native delayed capture did not begin');
-        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
-        await waitUntil(() => !extension._busy, 'Native assignment change did not cancel delayed capture');
-        assert(!directory.get_child('Native-revoked-screen.png').query_exists(null),
-            'Revoked native capture saved a delayed screenshot');
-        settings.set_int('capture-delay-ms', 0);
-        await pressShortcut(Clutter.KEY_F11);
-        await waitUntil(() => extension._selector?._grabHelper.grabbed, 'Native assignment change selector did not open');
-        extension._settings.emit('changed::shortcut-screen', 'shortcut-screen');
-        await waitUntil(() => !extension._selector, 'Native assignment change did not cancel selection');
-        assert(!directory.get_child('Native-revoked-area.png').query_exists(null),
-            'Revoked native selection saved a screenshot');
-        print('PASS: native assignment changes cancels pending captures and pickers');
-        settings.set_boolean('shortcuts-enabled', false);
-        assert(extension._shortcuts.bindings.size === 0, 'Master switch did not release native keys');
-        assert(settings.get_string('shortcut-screen') === originalScreenBinding, 'Master switch erased saved keys');
-        settings.set_boolean('shortcuts-enabled', true);
-        assert(extension._shortcuts.bindings.size === 3, 'Master switch did not restore native keys immediately');
-        const nativeNames = [...extension._shortcuts.bindings.values()].map(binding => binding.name);
         extension.disable();
-        assert(nativeNames.every(name => !(name in Main.wm._allowedKeybindings)), 'Native shortcut allowances leaked on disable');
-        const freeProbe = global.display.grab_accelerator(originalScreenBinding, Meta.KeyBindingFlags.NONE);
-        assert(freeProbe !== Meta.KeyBindingAction.NONE, 'Disable did not release native shortcut');
-        global.display.ungrab_accelerator(freeProbe);
+        settings.set_string('shortcut-setup', 'extension');
+        settings.set_boolean('shortcuts-enabled', true);
+        settings.set_boolean('ask-command-confirmation', false);
         extension.enable();
-        assert(extension._shortcuts.bindings.size === 3, 'Native shortcuts did not restore after enable');
-        settings.set_string('filename-template', 'Native-restarted-{N}');
-        await pressShortcut(Clutter.KEY_F10);
-        await waitUntil(() => !extension._busy && directory.get_child('Native-restarted-screen.png').query_exists(null),
-            'Native shortcut did not capture immediately after restart');
-        assert(!extension._commandDialog, 'Native shortcut requested approval after restart');
-        settings.set_string('shortcut-setup', 'gnome');
-        assert(extension._shortcuts.bindings.size === 0 && settings.get_string('shortcut-screen') === originalScreenBinding,
-            'Mode switch did not release keys and preserve configuration');
-        settings.set_boolean('ask-command-confirmation', true);
+        assert(!settings.get_boolean('shortcuts-enabled') && settings.get_boolean('ask-command-confirmation') &&
+            settings.get_string('shortcut-setup') === 'gnome', 'Legacy native setup was not migrated safely');
+        const migratedCommand = await requestCapture('screen').then(() => null, error => error);
+        assert(Gio.DBusError.get_remote_error(migratedCommand) === 'dev.fxth.ScreenshotUtils.Unavailable',
+            'Legacy native permissions enabled external screenshot commands');
+        settings.set_boolean('shortcuts-enabled', true);
         settings.set_string('filename-template', 'Integration-{N}');
-        print('PASS: real native keypresses, all modes, conflicts, external-command isolation and complete shortcut cleanup');
+        print('PASS: removed native shortcut setups require command opt-in after upgrade');
         const preferencesTest = Gio.Subprocess.new([
             'gjs', ...(GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ? [] : ['-m']),
             GLib.getenv('SCREENSHOT_UTILS_LEGACY_TESTS') ?? GLib.build_filenamev([GLib.getenv('PWD'), 'tests', 'preferences.js']), extension.path,

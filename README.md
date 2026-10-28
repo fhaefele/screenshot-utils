@@ -22,7 +22,7 @@ Install or manage Screenshot Utils with one command. Requires Bash, Python 3, cu
 curl -fsSL https://raw.githubusercontent.com/fhaefele/screenshot-utils/main/scripts/install.sh | bash
 ```
 
-The menu offers install/update, enable/disable, reset and uninstall. It shows installed and target versions. Updates preserve preferences by default; reinstall, reset and uninstall require confirmation. Reset affects only Screenshot Utils preferences and extension-managed shortcuts, requires `dconf`, and keeps GNOME custom shortcuts and screenshot files.
+The menu offers install/update, enable/disable, reset and uninstall. It shows installed and target versions. Updates preserve preferences by default; reinstall, reset and uninstall require confirmation. Reset affects only Screenshot Utils preferences, requires `dconf`, and keeps GNOME custom shortcuts and screenshot files.
 
 For unattended install/update and enable, use `bash scripts/install.sh --yes` after downloading the script. This never reinstalls, downgrades, resets settings or uninstalls.
 
@@ -46,15 +46,13 @@ Preferences shows the installed version and checks GitHub for updates when opene
 
 ## Keyboard shortcuts
 
-Shortcuts start off. In Preferences, turn on **Enable keyboard shortcuts** and choose a **Source**. New setups select Extension.
+Shortcuts start off. In Preferences, turn on **Enable keyboard shortcuts**. Configure custom shortcuts under GNOME Keyboard settings → View and customize shortcuts → Custom shortcuts → Add. Copy the commands from Preferences.
 
-Choose **Extension** to assign keys in Preferences. They work globally outside Overview and Shell menus or dialogs, without confirmation. Occupied system shortcuts are rejected. External screenshot commands are disabled in this mode.
+**Ask for every request** starts on. When off, any local application can invoke the commands without confirmation. The choice persists across logins and restarts. Unrestricted programs running as you can change these settings, including turning confirmation off.
 
-Choose **GNOME keyboard settings** to configure custom shortcuts under Keyboard settings → View and customize shortcuts → Custom shortcuts → Add. Copy the commands from Preferences.
+Turning shortcuts off cancels pending shortcut captures and keeps GNOME assignments. Print Screen stays unchanged.
 
-**Ask for every request** applies to GNOME commands and starts on. When off, any local application can invoke the commands without confirmation. The choice persists across logins and restarts. Switching to Extension resets Ask to on. Unrestricted programs running as you can change these settings, including turning confirmation off.
-
-Turning shortcuts off cancels pending shortcut captures and keeps assignments. Print Screen stays unchanged.
+Extension-managed shortcuts have been removed. Existing GNOME shortcuts and confirmation settings are preserved. Former extension-mode setups upgrade with shortcuts off and confirmation on; recreate their keys in GNOME Keyboard settings.
 
 ## Build and test
 

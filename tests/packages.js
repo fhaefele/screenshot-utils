@@ -8,7 +8,7 @@ const metadata = JSON.parse(readFileSync('metadata.json', 'utf8'));
 const schema = readFileSync('schemas/org.gnome.shell.extensions.screenshot-utils.gschema.xml', 'utf8');
 const license = readFileSync('LICENSE', 'utf8');
 const modernModules = ['delay.js', 'filename.js', 'location.js', 'prefs-compat.js', 'shell-compat.js',
-    'capture-selectors.js', 'async-utils.js', 'capture-icons.js', 'shortcuts.js', 'shortcut-manager.js', 'shortcut-prefs.js', 'release-info.js', 'prefs-release.js'];
+    'capture-selectors.js', 'async-utils.js', 'capture-icons.js', 'shortcuts.js', 'shortcut-prefs.js', 'release-info.js', 'prefs-release.js'];
 const supportedVersions = [];
 for (const target of ['legacy', 'modern']) {
     const archive = `dist/${target}/${metadata.uuid}.shell-extension.zip`;
